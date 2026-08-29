@@ -4,4 +4,5 @@ export interface ClientRepository {
   list(): Promise<Client[]>
   add(input: NewClient): Promise<Client>
   addPayment(clientId: string, input: NewPayment): Promise<Client>
+  updateNote(clientId: string, note: string): Promise<Client>
 }

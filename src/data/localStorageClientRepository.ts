@@ -2,10 +2,13 @@ import type { Client, NewClient, NewPayment, Payment } from '../domain/client'
 import { addCalendarMonths, isCalendarDate, normalizeRussianPhone, renewClient } from '../domain/client'
 import type { ClientRepository } from './clientRepository'
 
-const STORAGE_KEY = 'abon.clients.v2'
+const STORAGE_KEY = 'abon.clients.v3'
+const PREVIOUS_STORAGE_KEY = 'abon.clients.v2'
 const LEGACY_STORAGE_KEY = 'abon.clients.v1'
 
-type LegacyClient = Omit<Client, 'payments'> & {
+type PreviousClient = Omit<Client, 'note'>
+
+type LegacyClient = Omit<PreviousClient, 'payments'> & {
   firstPayment: Omit<Payment, 'id' | 'membershipEndsOn' | 'createdAt'>
 }
 
@@ -36,6 +39,7 @@ function hasValidClientFields(client: Record<string, unknown>) {
       && client.name.trim().length > 0
       && typeof client.phone === 'string'
       && normalizeRussianPhone(client.phone) === client.phone
+      && (client.note === undefined || typeof client.note === 'string')
       && typeof client.membershipEndsOn === 'string'
       && isCalendarDate(client.membershipEndsOn)
       && typeof client.createdAt === 'string'
@@ -48,7 +52,8 @@ function hasValidClientFields(client: Record<string, unknown>) {
 function isClient(value: unknown): value is Client {
   if (!value || typeof value !== 'object') return false
   const client = value as Record<string, unknown>
-  if (!hasValidClientFields(client) || !Array.isArray(client.payments) || client.payments.length === 0) return false
+  if (!hasValidClientFields(client) || typeof client.note !== 'string'
+    || !Array.isArray(client.payments) || client.payments.length === 0) return false
 
   const payments = client.payments
   return payments.every(isPayment)
@@ -80,11 +85,12 @@ function parseClients(stored: string, guard: (value: unknown) => boolean) {
   return parsed
 }
 
-function migrateClient(client: LegacyClient): Client {
+function migrateLegacyClient(client: LegacyClient): Client {
   return {
     id: client.id,
     name: client.name,
     phone: client.phone,
+    note: '',
     membershipEndsOn: client.membershipEndsOn,
     payments: [{
       id: `legacy-${client.id}`,
@@ -96,14 +102,29 @@ function migrateClient(client: LegacyClient): Client {
   }
 }
 
+function migratePreviousClient(client: PreviousClient): Client {
+  return { ...client, note: '' }
+}
+
 function readClients(): Client[] {
   const stored = window.localStorage.getItem(STORAGE_KEY)
   if (stored) return parseClients(stored, isClient) as Client[]
 
+  const previousStored = window.localStorage.getItem(PREVIOUS_STORAGE_KEY)
+  if (previousStored) {
+    const clients = (parseClients(previousStored, (value) => {
+      if (!value || typeof value !== 'object') return false
+      const client = value as Record<string, unknown>
+      return client.note === undefined && isClient({ ...client, note: '' })
+    }) as PreviousClient[]).map(migratePreviousClient)
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(clients))
+    return clients
+  }
+
   const legacyStored = window.localStorage.getItem(LEGACY_STORAGE_KEY)
   if (!legacyStored) return []
 
-  const clients = (parseClients(legacyStored, isLegacyClient) as LegacyClient[]).map(migrateClient)
+  const clients = (parseClients(legacyStored, isLegacyClient) as LegacyClient[]).map(migrateLegacyClient)
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(clients))
   return clients
 }
@@ -129,6 +150,7 @@ export const localStorageClientRepository: ClientRepository = {
       id: crypto.randomUUID(),
       name,
       phone: normalizeRussianPhone(input.phone),
+      note: '',
       membershipEndsOn,
       payments: [{
         id: crypto.randomUUID(),
@@ -153,6 +175,18 @@ export const localStorageClientRepository: ClientRepository = {
     const updatedClient = renewClient(clients[clientIndex], input, new Date().toISOString())
     if (updatedClient === clients[clientIndex]) return updatedClient
 
+    const updatedClients = [...clients]
+    updatedClients[clientIndex] = updatedClient
+    writeClients(updatedClients)
+    return updatedClient
+  },
+
+  async updateNote(clientId: string, note: string) {
+    const clients = readClients()
+    const clientIndex = clients.findIndex((client) => client.id === clientId)
+    if (clientIndex < 0) throw new Error('Client not found')
+
+    const updatedClient = { ...clients[clientIndex], note: note.trim() }
     const updatedClients = [...clients]
     updatedClients[clientIndex] = updatedClient
     writeClients(updatedClients)

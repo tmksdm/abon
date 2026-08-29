@@ -34,7 +34,36 @@ describe('localStorageClientRepository', () => {
       id: 'client-1', payments: [{ id: 'legacy-client-1', amountRubles: 3000 }],
     }])
     expect(window.localStorage.getItem('abon.clients.v1')).not.toBeNull()
+    expect(window.localStorage.getItem('abon.clients.v3')).not.toBeNull()
+  })
+
+  it('переносит данные v2 с пустой заметкой без потери оплат', async () => {
+    window.localStorage.setItem('abon.clients.v2', JSON.stringify([{
+      id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67', membershipEndsOn: '2026-09-29',
+      payments: [{
+        id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
+        membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
+      }],
+      createdAt: '2026-08-29T00:00:00.000Z',
+    }]))
+
+    await expect(localStorageClientRepository.list()).resolves.toMatchObject([{
+      id: 'client-1', note: '', payments: [{ id: 'payment-1' }],
+    }])
     expect(window.localStorage.getItem('abon.clients.v2')).not.toBeNull()
+    expect(window.localStorage.getItem('abon.clients.v3')).not.toBeNull()
+  })
+
+  it('сохраняет обрезанную по краям заметку', async () => {
+    const client = await localStorageClientRepository.add({
+      name: 'Анна', phone: '9001234567', amountRubles: 3000,
+      paidOn: '2026-08-29', durationMonths: 1,
+    })
+    await localStorageClientRepository.updateNote(client.id, '  Вечерние тренировки.  ')
+
+    await expect(localStorageClientRepository.list()).resolves.toMatchObject([{
+      id: client.id, note: 'Вечерние тренировки.',
+    }])
   })
 
   it('не создаёт дубль при повторе операции оплаты', async () => {

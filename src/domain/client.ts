@@ -22,6 +22,7 @@ export type Client = {
   id: string
   name: string
   phone: string
+  note: string
   membershipEndsOn: string
   payments: Payment[]
   createdAt: string

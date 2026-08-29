@@ -40,6 +40,7 @@ describe('client domain', () => {
   it('продлевает действующий абонемент и не дублирует повторную оплату', () => {
     const client = {
       id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67',
+      note: '',
       membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
       payments: [{
         id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,

@@ -8,6 +8,7 @@ const client: Client = {
   id: 'client-1',
   name: 'Анна',
   phone: '+7 900 123-45-67',
+  note: '',
   membershipEndsOn: '2026-09-29',
   payments: [{
     id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
@@ -25,6 +26,7 @@ function createRepository(): ClientRepository {
       membershipEndsOn: '2026-10-29',
       payments: [{ ...input, membershipEndsOn: '2026-10-29', createdAt: '2026-09-20T00:00:00.000Z' }, ...client.payments],
     })),
+    updateNote: vi.fn().mockImplementation(async (_clientId, note) => ({ ...client, note: note.trim() })),
   }
 }
 
@@ -72,6 +74,24 @@ describe('App', () => {
     expect(screen.getByText('2')).toBeInTheDocument()
   })
 
+  it('сохраняет заметку в карточке и показывает её одной строкой в списке', async () => {
+    const repository = createRepository()
+    vi.mocked(repository.list).mockResolvedValue([client])
+    render(<App repository={repository} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Анна/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить' }))
+    fireEvent.change(screen.getByLabelText('Текст заметки'), { target: { value: '  Предпочитает вечерние тренировки\nПозвонить заранее.  ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить заметку' }))
+
+    await waitFor(() => expect(repository.updateNote).toHaveBeenCalledWith(
+      'client-1', '  Предпочитает вечерние тренировки\nПозвонить заранее.  ',
+    ))
+    expect(await screen.findByText(/Предпочитает вечерние тренировки/)).toHaveTextContent('Предпочитает вечерние тренировки Позвонить заранее.')
+    fireEvent.click(screen.getByRole('button', { name: 'К списку' }))
+    expect(screen.getByText(/Предпочитает вечерние тренировки/)).toHaveClass('client-note-preview')
+  })
+
   it('не раскрывает данные при ошибке чтения', async () => {
     const repository = createRepository()
     vi.mocked(repository.list).mockRejectedValue(new Error('Storage error'))
@@ -85,7 +105,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
 
     expect(screen.getByRole('heading', { name: 'Настройки' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260829.6')
+    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260829.7')
     expect(screen.getByRole('heading', { name: 'История версий' })).toBeInTheDocument()
     expect(screen.getByText('Добавлены история версий в настройках и полный формат дат.')).toBeInTheDocument()
   })

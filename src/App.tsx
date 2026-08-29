@@ -62,6 +62,16 @@ function App({ repository = localStorageClientRepository }: AppProps) {
     }
   }
 
+  const updateNote = async (note: string) => {
+    if (!selectedClient) return
+    try {
+      const updatedClient = await repository.updateNote(selectedClient.id, note)
+      setClients((current) => current.map((client) => client.id === updatedClient.id ? updatedClient : client))
+    } catch {
+      throw new Error('Note was not saved')
+    }
+  }
+
   const showClientList = () => {
     setSelectedClientId(null)
     setIsAddingPayment(false)
@@ -97,7 +107,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
         <SettingsScreen onBack={showClientList} />
       ) : selectedClient ? (
         <ClientScreen client={selectedClient} isAddingPayment={isAddingPayment} onBack={showClientList}
-          onAddPayment={addPayment} onCancelPayment={() => setIsAddingPayment(false)} />
+          onAddPayment={addPayment} onCancelPayment={() => setIsAddingPayment(false)} onUpdateNote={updateNote} />
       ) : (
         <ClientListScreen clients={clients} isAdding={isAddingClient} onAddClient={addClient}
           onStartAdd={() => setIsAddingClient(true)} onCancelAdd={() => setIsAddingClient(false)}
@@ -164,6 +174,7 @@ function ClientListScreen({ clients, isAdding, onAddClient, onStartAdd, onCancel
                 <span><span className="detail-label">До</span><strong>{formatDisplayDate(client.membershipEndsOn)}</strong></span>
                 <span><span className="detail-label">Последняя оплата</span><strong>{moneyFormatter.format(client.payments[0].amountRubles)}</strong></span>
               </span>
+              {client.note && <span className="client-note-preview">{client.note}</span>}
             </button>
           </li>
         })}
@@ -178,9 +189,10 @@ type ClientScreenProps = {
   onBack(): void
   onAddPayment(input: NewPayment): Promise<void>
   onCancelPayment(): void
+  onUpdateNote(note: string): Promise<void>
 }
 
-function ClientScreen({ client, isAddingPayment, onBack, onAddPayment, onCancelPayment }: ClientScreenProps) {
+function ClientScreen({ client, isAddingPayment, onBack, onAddPayment, onCancelPayment, onUpdateNote }: ClientScreenProps) {
   const status = getMembershipStatus(client.membershipEndsOn)
   const payments = [...client.payments].sort((left, right) => right.paidOn.localeCompare(left.paidOn) || right.createdAt.localeCompare(left.createdAt))
   return <>
@@ -193,6 +205,7 @@ function ClientScreen({ client, isAddingPayment, onBack, onAddPayment, onCancelP
     <section className="membership-summary" aria-label="Текущий абонемент">
       <span>Абонемент до</span><strong>{formatDisplayDate(client.membershipEndsOn)}</strong>
     </section>
+    <ClientNote note={client.note} onSave={onUpdateNote} />
     {isAddingPayment && <AddPaymentForm onSubmit={onAddPayment} onCancel={onCancelPayment} />}
     <section className="history-section" aria-labelledby="payment-history-title">
       <div className="section-heading"><div><p className="eyebrow">Все операции</p><h2 id="payment-history-title">История оплат</h2></div>
@@ -205,6 +218,46 @@ function ClientScreen({ client, isAddingPayment, onBack, onAddPayment, onCancelP
       </ol>
     </section>
   </>
+}
+
+function ClientNote({ note, onSave }: { note: string; onSave(note: string): Promise<void> }) {
+  const [isEditing, setIsEditing] = useState(false)
+  const [value, setValue] = useState(note)
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const save = async () => {
+    setIsSaving(true)
+    setError(null)
+    try {
+      await onSave(value)
+      setValue(value.trim())
+      setIsEditing(false)
+    } catch {
+      setError('Не удалось сохранить заметку. Попробуйте ещё раз.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  if (isEditing) {
+    return <section className="note-card" aria-labelledby="client-note-title">
+      <div className="section-heading"><h2 id="client-note-title">Заметка</h2></div>
+      <label htmlFor="client-note">Текст заметки</label>
+      <textarea id="client-note" rows={4} value={value} onChange={(event) => setValue(event.target.value)} autoFocus />
+      {error && <p className="field-error" role="alert">{error}</p>}
+      <div className="form-actions">
+        <button className="text-button" type="button" onClick={() => { setValue(note); setError(null); setIsEditing(false) }}>Отмена</button>
+        <button className="primary-button" type="button" disabled={isSaving} onClick={() => void save()}>{isSaving ? 'Сохраняем…' : 'Сохранить заметку'}</button>
+      </div>
+    </section>
+  }
+
+  return <section className="note-card" aria-labelledby="client-note-title">
+    <div className="section-heading"><h2 id="client-note-title">Заметка</h2>
+      <button className="text-button" type="button" onClick={() => setIsEditing(true)}>{note ? 'Изменить' : 'Добавить'}</button></div>
+    {note ? <p className="client-note">{note}</p> : <p className="empty-note">Заметки пока нет.</p>}
+  </section>
 }
 
 export default App
