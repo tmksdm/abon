@@ -59,6 +59,14 @@ export type MembershipStatus = {
   label: string
 }
 
+export type ClientListFilter = 'all' | 'attention' | 'active' | 'frozen'
+
+export type ClientAttentionSummary = {
+  overdue: number
+  dueSoon: number
+  total: number
+}
+
 const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 const MONTH_NAMES = [
   'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
@@ -151,6 +159,11 @@ export function formatDisplayDate(value: string) {
   return `${day} ${MONTH_NAMES[month - 1]} ${year}`
 }
 
+export function formatCompactDate(value: string) {
+  const { year, month, day } = parseCalendarDate(value)
+  return `${String(day).padStart(2, '0')}.${String(month).padStart(2, '0')}.${year}`
+}
+
 export function localCalendarDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
@@ -170,6 +183,12 @@ export function getMembershipStatus(
   return { kind: 'active', label: 'Активен' }
 }
 
+export function getMembershipDaysLeft(membershipEndsOn: string, today = localCalendarDate()) {
+  return Math.round(
+    (parseCalendarDate(membershipEndsOn).time - parseCalendarDate(today).time) / 86_400_000,
+  )
+}
+
 export function getActiveFreeze(client: Client, today = localCalendarDate()) {
   return client.freezes.find((freeze) => {
     const resumesOn = freeze.resumedOn ?? freeze.plannedResumesOn
@@ -180,6 +199,45 @@ export function getActiveFreeze(client: Client, today = localCalendarDate()) {
 export function getClientMembershipStatus(client: Client, today = localCalendarDate()): MembershipStatus {
   if (getActiveFreeze(client, today)) return { kind: 'frozen', label: 'Заморожен' }
   return getMembershipStatus(client.membershipEndsOn, today)
+}
+
+export function sortClientsByUrgency(clients: Client[], today = localCalendarDate()) {
+  return [...clients].sort((left, right) => {
+    const leftFrozen = getActiveFreeze(left, today) !== null
+    const rightFrozen = getActiveFreeze(right, today) !== null
+    if (leftFrozen !== rightFrozen) return leftFrozen ? 1 : -1
+    if (left.membershipEndsOn !== right.membershipEndsOn) {
+      return left.membershipEndsOn.localeCompare(right.membershipEndsOn)
+    }
+    return left.name.localeCompare(right.name, 'ru')
+  })
+}
+
+export function getClientAttentionSummary(clients: Client[], today = localCalendarDate()): ClientAttentionSummary {
+  let overdue = 0
+  let dueSoon = 0
+  for (const client of clients) {
+    const status = getClientMembershipStatus(client, today)
+    if (status.kind === 'expired') overdue += 1
+    if (status.kind === 'due-soon') dueSoon += 1
+  }
+  return { overdue, dueSoon, total: overdue + dueSoon }
+}
+
+export function selectClientsForList(
+  clients: Client[], query: string, filter: ClientListFilter, today = localCalendarDate(),
+) {
+  const normalizedQuery = query.trim().toLocaleLowerCase('ru-RU')
+  return sortClientsByUrgency(clients, today).filter((client) => {
+    const matchesQuery = normalizedQuery === ''
+      || client.name.toLocaleLowerCase('ru-RU').includes(normalizedQuery)
+    if (!matchesQuery) return false
+    const status = getClientMembershipStatus(client, today)
+    if (filter === 'attention') return status.kind === 'expired' || status.kind === 'due-soon'
+    if (filter === 'active') return status.kind === 'active'
+    if (filter === 'frozen') return status.kind === 'frozen'
+    return true
+  })
 }
 
 function freezeResumesOn(freeze: MembershipFreeze) {

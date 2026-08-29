@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import App from './App'
 import type { Client } from './domain/client'
@@ -62,8 +62,8 @@ describe('App', () => {
       name: 'Анна', phone: '+7 900 123-45-67', amountRubles: 3000,
       paidOn: '2026-08-29', durationMonths: 1,
     }))
-    expect(await screen.findByText('3 000 ₽')).toBeInTheDocument()
-    expect(screen.getByText('29 сентября 2026')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Анна/ }))
+      .toHaveTextContent(/29\.08\.2026·3 000 ₽·до 29\.09\.2026·Месяц/)
   })
 
   it('открывает клиента и продлевает абонемент новой оплатой', async () => {
@@ -118,7 +118,8 @@ describe('App', () => {
     })))
     render(<App repository={repository} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Настроить' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Настроить' }))
     expect(screen.getByText('Будут затронуты: 2')).toBeInTheDocument()
     expect(screen.getByText('Всего будет добавлено 14 клиент-дн.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Применить общую заморозку' }))
@@ -128,6 +129,36 @@ describe('App', () => {
     })))
     expect(await screen.findByText('Затронуто клиентов: 2. Добавлено 14 клиент-дн.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Завершить сегодня' })).toBeInTheDocument()
+  })
+
+  it('сразу показывает срочных сверху в компактных карточках и фильтрует список', async () => {
+    const repository = createRepository()
+    const today = localCalendarDate()
+    const expired = { ...client, id: 'expired', name: 'Орлов Юрий', membershipEndsOn: addCalendarDays(today, -10),
+      payments: [{ ...client.payments[0], id: 'pay-expired', paidOn: addCalendarDays(today, -40), amountRubles: 3000 }] }
+    const due = { ...client, id: 'due', name: 'Белова Дарья', membershipEndsOn: addCalendarDays(today, 2),
+      payments: [{ ...client.payments[0], id: 'pay-due', paidOn: addCalendarDays(today, -28), amountRubles: 3500 }] }
+    const active = { ...client, id: 'active', name: 'Соколов Егор', membershipEndsOn: addCalendarDays(today, 30) }
+    const frozen = { ...client, id: 'frozen', name: 'Воронова Майя', membershipEndsOn: addCalendarDays(today, -30),
+      freezes: [{ id: 'freeze', startsOn: addCalendarDays(today, -1), plannedResumesOn: addCalendarDays(today, 5),
+        batchId: null, resumedOn: null, daysApplied: 6, createdAt: new Date().toISOString(), resumedAt: null }] }
+    vi.mocked(repository.list).mockResolvedValue([active, frozen, due, expired])
+    render(<App repository={repository} />)
+
+    const list = await screen.findByRole('list', { name: 'Список клиентов' })
+    expect(within(list).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      expect.stringContaining('Орлов Юрий'), expect.stringContaining('Белова Дарья'),
+      expect.stringContaining('Соколов Егор'), expect.stringContaining('Воронова Майя'),
+    ])
+    expect(screen.getByRole('button', { name: /2 клиента требуют продления/ })).toBeInTheDocument()
+    expect(screen.queryByText('+7 900 123-45-67')).not.toBeInTheDocument()
+    expect(within(list).getAllByRole('button')[0]).toHaveTextContent('Месяц')
+
+    fireEvent.change(screen.getByPlaceholderText('Поиск по имени'), { target: { value: 'орл' } })
+    expect(within(list).getAllByRole('button')).toHaveLength(1)
+    expect(within(list).getByRole('button', { name: /Орлов Юрий/ })).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Фильтр клиентов' }), { target: { value: 'active' } })
+    expect(screen.getByRole('heading', { name: 'Никого не нашли' })).toBeInTheDocument()
   })
 
   it('сохраняет заметку в карточке и показывает её одной строкой в списке', async () => {
@@ -144,7 +175,7 @@ describe('App', () => {
       'client-1', '  Предпочитает вечерние тренировки\nПозвонить заранее.  ',
     ))
     expect(await screen.findByText(/Предпочитает вечерние тренировки/)).toHaveTextContent('Предпочитает вечерние тренировки Позвонить заранее.')
-    fireEvent.click(screen.getByRole('button', { name: 'К списку' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Abon, список клиентов' }))
     await waitFor(() => expect(screen.getByText(/Предпочитает вечерние тренировки/)).toHaveClass('client-note-preview'))
   })
 
@@ -161,7 +192,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
 
     expect(screen.getByRole('heading', { name: 'Настройки' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260830')
+    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260830.2')
     expect(screen.getByRole('heading', { name: 'История версий' })).toBeInTheDocument()
     expect(screen.getByText('Добавлены история версий в настройках и полный формат дат.')).toBeInTheDocument()
   })
@@ -174,7 +205,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
     fireEvent.click(screen.getByRole('button', { name: 'Включить demo-режим' }))
 
-    expect(await screen.findByLabelText('Демонстрационный режим')).toHaveTextContent('Все изменения временные')
+    expect(await screen.findByText('Demo')).toBeInTheDocument()
     expect(screen.getByText('28')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Алёна Соколова/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Изменить' }))
@@ -183,7 +214,9 @@ describe('App', () => {
 
     await screen.findByText('Только demo')
     expect(repository.updateNote).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Выйти и очистить' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Abon, список клиентов' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Настройки' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Выйти и очистить demo-данные' }))
 
     expect(await screen.findByRole('button', { name: /Анна/ })).toBeInTheDocument()
     expect(screen.queryByText('Только demo')).not.toBeInTheDocument()

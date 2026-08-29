@@ -4,12 +4,14 @@ import { AddClientForm } from './components/AddClientForm'
 import { AddPaymentForm } from './components/AddPaymentForm'
 import { BatchFreezeForm } from './components/BatchFreezeForm'
 import { FreezeMembershipForm } from './components/FreezeMembershipForm'
+import { Icon } from './components/Icon'
 import { ReloadPrompt } from './components/ReloadPrompt'
 import type {
-  Client, MembershipFreeze, NewClient, NewMembershipFreeze, NewMembershipFreezeBatch, NewPayment,
+  Client, ClientListFilter, MembershipFreeze, NewClient, NewMembershipFreeze, NewMembershipFreezeBatch, NewPayment,
 } from './domain/client'
 import {
-  formatDisplayDate, getActiveFreeze, getClientMembershipStatus, localCalendarDate,
+  formatCompactDate, formatDisplayDate, getActiveFreeze, getClientAttentionSummary,
+  getClientMembershipStatus, getMembershipDaysLeft, localCalendarDate, selectClientsForList,
 } from './domain/client'
 import type { ClientRepository } from './data/clientRepository'
 import { createDemoClientRepository } from './data/demoClientRepository'
@@ -17,8 +19,8 @@ import { localStorageClientRepository } from './data/localStorageClientRepositor
 
 type AppProps = { repository?: ClientRepository }
 type AppView =
-  | { screen: 'clients'; isAddingClient?: boolean; isAddingBatchFreeze?: boolean }
-  | { screen: 'settings' }
+  | { screen: 'clients'; isAddingClient?: boolean }
+  | { screen: 'settings'; isAddingBatchFreeze?: boolean }
   | { screen: 'client'; clientId: string; isAddingPayment?: boolean; isAddingFreeze?: boolean }
 
 const HISTORY_STATE_KEY = 'abonView'
@@ -39,12 +41,14 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [clientFilter, setClientFilter] = useState<ClientListFilter>('all')
   const selectedClient = clients.find((client) => client.id === selectedClientId) ?? null
 
   const applyView = (view: AppView) => {
     setSelectedClientId(view.screen === 'client' ? view.clientId : null)
     setIsAddingClient(view.screen === 'clients' && view.isAddingClient === true)
-    setIsAddingBatchFreeze(view.screen === 'clients' && view.isAddingBatchFreeze === true)
+    setIsAddingBatchFreeze(view.screen === 'settings' && view.isAddingBatchFreeze === true)
     setIsAddingPayment(view.screen === 'client' && view.isAddingPayment === true)
     setIsAddingFreeze(view.screen === 'client' && view.isAddingFreeze === true)
     setIsSettingsOpen(view.screen === 'settings')
@@ -162,8 +166,9 @@ function App({ repository = localStorageClientRepository }: AppProps) {
       setClients(await activeRepository.freezeBatch(input))
       setIsAddingBatchFreeze(false)
       window.history.replaceState({
-        ...window.history.state, [HISTORY_STATE_KEY]: { screen: 'clients' },
+        ...window.history.state, [HISTORY_STATE_KEY]: { screen: 'settings' },
       }, '')
+      setIsSettingsOpen(true)
     } catch {
       throw new Error('Freeze batch was not saved')
     }
@@ -197,25 +202,16 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <button className="brand" type="button" onClick={showClientList} aria-label="Abon, список клиентов">
+        {!isSettingsOpen && !selectedClient ? <>
+          <div className="home-title"><span className="brand-mark" aria-hidden="true">A</span><h1>Клиенты</h1><span className="client-count">{clients.length}</span>
+            {isDemoMode && <span className="demo-badge">Demo</span>}</div>
+          <button className="icon-button" type="button" aria-label="Настройки"
+            onClick={() => pushView({ screen: 'settings' })}><Icon name="settings" /></button>
+        </> : <button className="brand" type="button" onClick={showClientList} aria-label="Abon, список клиентов">
           <span className="brand-mark" aria-hidden="true">A</span><span>Abon</span>
-        </button>
-        {isSettingsOpen ? null : selectedClient ? (
-          <button className="primary-button topbar-action" type="button"
-            onClick={() => pushView({ screen: 'client', clientId: selectedClient.id, isAddingPayment: true })}>Новая оплата</button>
-        ) : (
-          <div className="topbar-actions">
-            <button className="text-button" type="button" onClick={() => pushView({ screen: 'settings' })}>Настройки</button>
-            <button className="primary-button topbar-action" type="button"
-              onClick={() => pushView({ screen: 'clients', isAddingClient: true })}>Добавить</button>
-          </div>
-        )}
+          {isDemoMode && <span className="demo-badge">Demo</span>}
+        </button>}
       </header>
-
-      {isDemoMode && <section className="notice demo-notice" aria-label="Демонстрационный режим">
-        <div><strong>Demo-режим</strong><p>Все изменения временные и не затрагивают вашу базу.</p></div>
-        <button className="quiet-button" type="button" onClick={exitDemoMode}>Выйти и очистить</button>
-      </section>}
 
       {error && (
         <section className="notice error-notice" role="alert">
@@ -227,7 +223,10 @@ function App({ repository = localStorageClientRepository }: AppProps) {
       {error ? null : isLoading ? (
         <p className="loading" role="status">Загружаем клиентов…</p>
       ) : isSettingsOpen ? (
-        <SettingsScreen isDemoMode={isDemoMode} onEnableDemo={enterDemoMode} onExitDemo={exitDemoMode}
+        <SettingsScreen clients={clients} isDemoMode={isDemoMode} isAddingBatchFreeze={isAddingBatchFreeze}
+          onEnableDemo={enterDemoMode} onExitDemo={exitDemoMode} onFreezeBatch={freezeBatch} onResumeBatch={resumeBatch}
+          onStartBatchFreeze={() => pushView({ screen: 'settings', isAddingBatchFreeze: true })}
+          onCancelBatchFreeze={() => window.history.back()}
           onBack={() => window.history.back()} />
       ) : selectedClient ? (
         <ClientScreen client={selectedClient} isAddingPayment={isAddingPayment} onBack={() => window.history.back()}
@@ -236,24 +235,41 @@ function App({ repository = localStorageClientRepository }: AppProps) {
           onFreeze={freezeMembership} onCancelFreeze={() => window.history.back()} onResume={resumeMembership}
           onUpdateNote={updateNote} />
       ) : (
-        <ClientListScreen clients={clients} isAdding={isAddingClient} isAddingBatchFreeze={isAddingBatchFreeze}
-          onAddClient={addClient} onFreezeBatch={freezeBatch} onResumeBatch={resumeBatch}
+        <ClientListScreen clients={clients} query={searchQuery} filter={clientFilter}
+          isAdding={isAddingClient}
+          onQueryChange={setSearchQuery} onFilterChange={setClientFilter}
+          onAddClient={addClient}
           onStartAdd={() => pushView({ screen: 'clients', isAddingClient: true })} onCancelAdd={() => window.history.back()}
-          onStartBatchFreeze={() => pushView({ screen: 'clients', isAddingBatchFreeze: true })}
-          onCancelBatchFreeze={() => window.history.back()}
           onOpenClient={(clientId) => pushView({ screen: 'client', clientId })} />
+      )}
+      {!error && !isLoading && !isSettingsOpen && !isAddingClient && !isAddingPayment && (
+        selectedClient ? <button className="floating-action" type="button" aria-label="Новая оплата"
+          onClick={() => pushView({ screen: 'client', clientId: selectedClient.id, isAddingPayment: true })}>
+          <Icon name="add" size={28} /></button>
+          : clients.length > 0 && <button className="floating-action" type="button" aria-label="Добавить клиента"
+            onClick={() => pushView({ screen: 'clients', isAddingClient: true })}><Icon name="add" size={28} /></button>
       )}
       <ReloadPrompt />
     </main>
   )
 }
 
-function SettingsScreen({ isDemoMode, onEnableDemo, onExitDemo, onBack }: {
+function SettingsScreen({
+  clients, isDemoMode, isAddingBatchFreeze, onEnableDemo, onExitDemo, onFreezeBatch,
+  onStartBatchFreeze, onCancelBatchFreeze, onResumeBatch, onBack,
+}: {
+  clients: Client[]
   isDemoMode: boolean
+  isAddingBatchFreeze: boolean
   onEnableDemo(): void
   onExitDemo(): void
+  onFreezeBatch(input: NewMembershipFreezeBatch): Promise<void>
+  onStartBatchFreeze(): void
+  onCancelBatchFreeze(): void
+  onResumeBatch(batchId: string): Promise<void>
   onBack(): void
 }) {
+  const activeBatch = findCurrentFreezeBatch(clients)
   return <>
     <button className="back-button" type="button" onClick={onBack}>К клиентам</button>
     <section className="page-heading settings-heading" aria-labelledby="settings-title">
@@ -272,6 +288,14 @@ function SettingsScreen({ isDemoMode, onEnableDemo, onExitDemo, onBack }: {
         {isDemoMode ? 'Выйти и очистить demo-данные' : 'Включить demo-режим'}
       </button>
     </section>
+    <section className="settings-card" aria-labelledby="batch-freeze-settings-title">
+      <div><p className="eyebrow">Редкая операция</p><h2 id="batch-freeze-settings-title">Общая заморозка</h2></div>
+      <p>Поставьте действующие абонементы на паузу на время болезни или отпуска тренера.</p>
+      {!activeBatch && !isAddingBatchFreeze && <button className="quiet-button" type="button"
+        onClick={onStartBatchFreeze}>Настроить</button>}
+      {activeBatch && <BatchFreezeSummary batch={activeBatch} onResume={onResumeBatch} />}
+      {isAddingBatchFreeze && <BatchFreezeForm clients={clients} onSubmit={onFreezeBatch} onCancel={onCancelBatchFreeze} />}
+    </section>
     <section className="history-section" aria-labelledby="version-history-title">
       <div className="section-heading"><div><p className="eyebrow">Что изменилось</p><h2 id="version-history-title">История версий</h2></div></div>
       <ol className="version-list">
@@ -285,31 +309,43 @@ function SettingsScreen({ isDemoMode, onEnableDemo, onExitDemo, onBack }: {
 
 type ClientListScreenProps = {
   clients: Client[]
+  query: string
+  filter: ClientListFilter
   isAdding: boolean
-  isAddingBatchFreeze: boolean
   onAddClient(input: NewClient): Promise<void>
   onStartAdd(): void
   onCancelAdd(): void
-  onFreezeBatch(input: NewMembershipFreezeBatch): Promise<void>
-  onStartBatchFreeze(): void
-  onCancelBatchFreeze(): void
-  onResumeBatch(batchId: string): Promise<void>
   onOpenClient(clientId: string): void
+  onQueryChange(query: string): void
+  onFilterChange(filter: ClientListFilter): void
 }
 
 function ClientListScreen({
-  clients, isAdding, isAddingBatchFreeze, onAddClient, onStartAdd, onCancelAdd,
-  onFreezeBatch, onStartBatchFreeze, onCancelBatchFreeze, onResumeBatch, onOpenClient,
+  clients, query, filter, isAdding, onAddClient, onStartAdd, onCancelAdd, onOpenClient,
+  onQueryChange, onFilterChange,
 }: ClientListScreenProps) {
-  const activeBatch = findCurrentFreezeBatch(clients)
+  const attention = getClientAttentionSummary(clients)
+  const visibleClients = selectClientsForList(clients, query, filter)
   return <>
-    <section className="page-heading" aria-labelledby="clients-title">
-      <div><p className="eyebrow">Учёт абонементов</p><h1 id="clients-title">Клиенты</h1></div>
-      <span className="client-count">{clients.length}</span>
-    </section>
-    {clients.length > 0 && <BatchFreezeSummary batch={activeBatch} isAdding={isAddingBatchFreeze}
-      onStart={onStartBatchFreeze} onResume={onResumeBatch} />}
-    {isAddingBatchFreeze && <BatchFreezeForm clients={clients} onSubmit={onFreezeBatch} onCancel={onCancelBatchFreeze} />}
+    {attention.total > 0 && <button className={`attention-banner${filter === 'attention' ? ' attention-banner-active' : ''}`}
+      type="button" aria-pressed={filter === 'attention'}
+      onClick={() => onFilterChange(filter === 'attention' ? 'all' : 'attention')}>
+      <span className="attention-count" aria-hidden="true">{attention.total}</span>
+      <span><strong>{attention.total} {clientWord(attention.total)} требуют продления</strong>
+        <small>{attention.overdue} просроч. · {attention.dueSoon} до 7 дней</small></span>
+      <Icon name="filter" />
+    </button>}
+    {clients.length > 0 && <div className="list-tools">
+      <label className="search-field"><span className="visually-hidden">Поиск клиентов</span><Icon name="search" />
+        <input type="search" value={query} onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="Поиск по имени" /></label>
+      <label className="filter-field"><span className="visually-hidden">Фильтр клиентов</span><Icon name="filter" />
+        <select aria-label="Фильтр клиентов" value={filter}
+          onChange={(event) => onFilterChange(event.target.value as ClientListFilter)}>
+          <option value="all">Все</option><option value="attention">На контроле</option>
+          <option value="active">Активные</option><option value="frozen">Заморожены</option>
+        </select></label>
+    </div>}
     {isAdding && <AddClientForm onSubmit={onAddClient} onCancel={onCancelAdd} />}
     {clients.length === 0 && !isAdding ? (
       <section className="empty-state">
@@ -317,20 +353,21 @@ function ClientListScreen({
         <p>Добавьте первого клиента и оплату — срок абонемента рассчитается автоматически.</p>
         <button className="primary-button" type="button" onClick={onStartAdd}>Добавить клиента</button>
       </section>
+    ) : visibleClients.length === 0 && !isAdding ? (
+      <section className="no-results"><h2>Никого не нашли</h2><p>Измените поиск или фильтр.</p>
+        <button className="text-button" type="button" onClick={() => { onQueryChange(''); onFilterChange('all') }}>Сбросить</button></section>
     ) : (
       <ul className="client-list" aria-label="Список клиентов">
-        {clients.map((client) => {
+        {visibleClients.map((client) => {
           const status = getClientMembershipStatus(client)
-          return <li key={client.id}>
+          const payment = client.payments[0]
+          return <li key={client.id} className={`status-row-${status.kind}`}>
             <button className="client-card" type="button" onClick={() => onOpenClient(client.id)}>
               <span className="client-card-heading">
-                <span className="client-identity"><strong>{client.name}</strong><span>{client.phone}</span></span>
-                <span className={`status-badge status-${status.kind}`}>{status.label}</span>
+                <span className="client-identity"><strong>{client.name}</strong></span>
+                <span className={`status-badge status-${status.kind}`}>{compactStatus(client)}</span>
               </span>
-              <span className="client-details">
-                <span><span className="detail-label">До</span><strong>{formatDisplayDate(client.membershipEndsOn)}</strong></span>
-                <span><span className="detail-label">Последняя оплата</span><strong>{moneyFormatter.format(client.payments[0].amountRubles)}</strong></span>
-              </span>
+              <span className="client-summary">{formatCompactDate(payment.paidOn)}<i>·</i>{moneyFormatter.format(payment.amountRubles)}<i>·</i>до {formatCompactDate(client.membershipEndsOn)}<i>·</i>{membershipLabel(payment.durationMonths)}</span>
               {client.note && <span className="client-note-preview">{client.note}</span>}
             </button>
           </li>
@@ -338,6 +375,30 @@ function ClientListScreen({
       </ul>
     )}
   </>
+}
+
+function compactStatus(client: Client) {
+  const status = getClientMembershipStatus(client)
+  const days = getMembershipDaysLeft(client.membershipEndsOn)
+  if (status.kind === 'frozen' || status.kind === 'active') return status.label
+  if (days === 0) return 'Сегодня'
+  if (days < 0) return `Просрочен ${Math.abs(days)} дн.`
+  return `${days} дн.`
+}
+
+function membershipLabel(months: number) {
+  if (months === 1) return 'Месяц'
+  if (months === 12) return 'Год'
+  return `${months} мес.`
+}
+
+function clientWord(count: number) {
+  const lastTwo = count % 100
+  if (lastTwo >= 11 && lastTwo <= 19) return 'клиентов'
+  const last = count % 10
+  if (last === 1) return 'клиент'
+  if (last >= 2 && last <= 4) return 'клиента'
+  return 'клиентов'
 }
 
 type FreezeBatchSummary = {
@@ -369,17 +430,14 @@ function findCurrentFreezeBatch(clients: Client[]): FreezeBatchSummary | null {
 }
 
 function BatchFreezeSummary({
-  batch, isAdding, onStart, onResume,
+  batch, onResume,
 }: {
-  batch: FreezeBatchSummary | null
-  isAdding: boolean
-  onStart(): void
+  batch: FreezeBatchSummary
   onResume(batchId: string): Promise<void>
 }) {
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const resume = async () => {
-    if (!batch) return
     setIsSaving(true)
     setError(null)
     try { await onResume(batch.id) }
@@ -389,15 +447,14 @@ function BatchFreezeSummary({
   return <section className="batch-freeze-card" aria-labelledby="batch-freeze-summary-title">
     <div className="section-heading">
       <div><p className="eyebrow">Пауза для зала</p><h2 id="batch-freeze-summary-title">Общая заморозка</h2></div>
-      {!isAdding && !batch && <button className="text-button" type="button" onClick={onStart}>Настроить</button>}
     </div>
-    {batch ? <>
+    <>
       <p className="freeze-period"><strong>{batch.isActive ? 'Действует сейчас' : 'Запланирована'}</strong>
         <span>{formatDisplayDate(batch.startsOn)} — {formatDisplayDate(batch.plannedResumesOn)}</span></p>
       <p className="empty-note">Затронуто клиентов: {batch.affectedClients}. Добавлено {batch.totalDaysApplied} клиент-дн.</p>
       {batch.isActive && <button className="quiet-button resume-button" type="button" disabled={isSaving}
         onClick={() => void resume()}>{isSaving ? 'Сохраняем…' : 'Завершить сегодня'}</button>}
-    </> : <p className="empty-note">При болезни или отпуске можно одной операцией сохранить дни всем активным клиентам.</p>}
+    </>
     {error && <p className="field-error" role="alert">{error}</p>}
   </section>
 }

@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest'
+import type { Client } from './client'
 import {
-  addCalendarMonths, formatDisplayDate, freezeClient, getClientMembershipStatus, getMembershipStatus,
-  localCalendarDate, normalizeRussianPhone, parseWholeRubles, previewFreezeBatch, renewClient, resumeClient,
+  addCalendarMonths, formatCompactDate, formatDisplayDate, freezeClient, getClientAttentionSummary,
+  getClientMembershipStatus, getMembershipStatus, localCalendarDate, normalizeRussianPhone,
+  parseWholeRubles, previewFreezeBatch, renewClient, resumeClient, selectClientsForList, sortClientsByUrgency,
 } from './client'
+
+function listClient(id: string, name: string, membershipEndsOn: string, freezes: Client['freezes'] = []): Client {
+  return {
+    id, name, phone: '+7 900 000-00-00', note: '', membershipEndsOn, freezes,
+    createdAt: '2026-08-01T00:00:00.000Z',
+    payments: [{
+      id: `payment-${id}`, amountRubles: 3000, paidOn: '2026-08-01', durationMonths: 1,
+      membershipEndsOn, createdAt: '2026-08-01T00:00:00.000Z',
+    }],
+  }
+}
 
 describe('client domain', () => {
   it('считает срок календарными месяцами и ограничивает короткий месяц', () => {
@@ -25,6 +38,7 @@ describe('client domain', () => {
 
   it('показывает дату с русским названием месяца', () => {
     expect(formatDisplayDate('2026-09-29')).toBe('29 сентября 2026')
+    expect(formatCompactDate('2026-09-09')).toBe('09.09.2026')
   })
 
   it('берёт сегодняшний день из локального календаря устройства', () => {
@@ -35,6 +49,32 @@ describe('client domain', () => {
     expect(getMembershipStatus('2026-09-20', '2026-09-10').kind).toBe('active')
     expect(getMembershipStatus('2026-09-17', '2026-09-10').kind).toBe('due-soon')
     expect(getMembershipStatus('2026-09-09', '2026-09-10').kind).toBe('expired')
+  })
+
+  it('сортирует по сроку, а замороженных всегда ставит вниз', () => {
+    const frozen = listClient('frozen', 'Заморожен', '2026-08-01', [{
+      id: 'freeze', startsOn: '2026-09-01', plannedResumesOn: '2026-09-20', batchId: null,
+      resumedOn: null, daysApplied: 19, createdAt: '2026-09-01T00:00:00.000Z', resumedAt: null,
+    }])
+    const clients = [
+      listClient('active', 'Активный', '2026-10-10'), frozen,
+      listClient('due', 'Срочный', '2026-09-12'), listClient('expired', 'Просроченный', '2026-09-01'),
+    ]
+
+    expect(sortClientsByUrgency(clients, '2026-09-10').map(({ id }) => id))
+      .toEqual(['expired', 'due', 'active', 'frozen'])
+    expect(getClientAttentionSummary(clients, '2026-09-10')).toEqual({ overdue: 1, dueSoon: 1, total: 2 })
+  })
+
+  it('совмещает поиск по любой части имени с фильтром', () => {
+    const clients = [
+      listClient('attention', 'Орлов Юрий', '2026-09-09'),
+      listClient('active', 'Орлова Анна', '2026-10-10'),
+      listClient('other', 'Петров Иван', '2026-09-08'),
+    ]
+
+    expect(selectClientsForList(clients, 'орл', 'attention', '2026-09-10').map(({ id }) => id))
+      .toEqual(['attention'])
   })
 
   it('продлевает действующий абонемент и не дублирует повторную оплату', () => {

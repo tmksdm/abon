@@ -107,10 +107,44 @@ select:focus-visible {
   min-height: 3rem;
 }
 
+.home-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.home-title h1 {
+  overflow: hidden;
+  font-size: 1.4rem;
+  letter-spacing: -0.035em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
   gap: 0.25rem;
+}
+
+.icon {
+  display: block;
+  flex: none;
+  fill: currentcolor;
+}
+
+.icon-button {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 0.85rem;
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  cursor: pointer;
 }
 
 .brand {
@@ -142,6 +176,17 @@ select:focus-visible {
   height: 2rem;
   border-radius: 0.65rem;
   font-size: 0.95rem;
+}
+
+.demo-badge {
+  padding: 0.18rem 0.38rem;
+  border-radius: 999px;
+  color: var(--color-frozen);
+  background: var(--color-frozen-soft);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .page-heading {
@@ -209,6 +254,12 @@ h2 {
   padding: 0 1rem;
   color: var(--color-text);
   background: var(--color-accent-soft);
+}
+
+.quiet-button:has(.icon) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 
 .text-button {
@@ -347,18 +398,105 @@ h2 {
   background: var(--color-danger-soft);
 }
 
-.demo-notice {
-  border-color: var(--color-frozen);
-  background: var(--color-frozen-soft);
+.attention-banner {
+  display: flex;
+  width: 100%;
+  min-height: 3.25rem;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+  color: var(--color-accent);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  text-align: left;
 }
 
-.demo-notice .quiet-button {
+.attention-banner > span:not(.attention-count) {
+  display: grid;
+  flex: 1;
+  gap: 0.1rem;
+}
+
+.attention-banner strong { color: var(--color-text); font-size: 0.82rem; }
+.attention-banner small { color: var(--color-muted); font-size: 0.72rem; }
+.attention-banner-active { border-color: var(--color-accent); background: var(--color-accent-soft); }
+
+.attention-count {
+  display: grid;
+  width: 1.85rem;
+  height: 1.85rem;
   flex: none;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.list-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
+}
+
+.search-field,
+.filter-field {
+  display: flex;
+  min-width: 0;
+  height: 2.65rem;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.8rem;
+  color: var(--color-muted);
+  background: var(--color-surface);
+}
+
+.search-field input,
+.filter-field select {
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  color: var(--color-text);
+  background: transparent;
+  outline: 0;
+  font-size: 0.84rem;
+}
+
+.search-field input { width: 100%; }
+.filter-field select { width: 4.5rem; cursor: pointer; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.no-results {
+  display: grid;
+  justify-items: start;
+  gap: 0.35rem;
+  padding: 1.25rem;
+  border: 1px dashed var(--color-border);
+  border-radius: 1rem;
+  color: var(--color-muted);
 }
 
 .client-list {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.4rem;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -374,9 +512,9 @@ h2 {
 .client-card {
   display: block;
   width: 100%;
-  padding: 1rem;
+  padding: 0.55rem 0.7rem;
   border: 1px solid var(--color-border);
-  border-radius: 1.15rem;
+  border-radius: 1rem;
   color: var(--color-text);
   background: var(--color-surface);
   box-shadow: var(--shadow-card);
@@ -385,19 +523,23 @@ h2 {
 }
 
 .client-card-heading {
-  align-items: flex-start;
-  gap: 1rem;
+  align-items: center;
+  gap: 0.6rem;
 }
 
 .client-identity {
-  display: grid;
-  gap: 0.3rem;
+  display: block;
   min-width: 0;
 }
 
 .client-identity strong {
-  font-size: 1.15rem;
+  display: block;
+  overflow: hidden;
+  font-size: 0.94rem;
+  line-height: 1.2;
   letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .client-identity span,
@@ -410,9 +552,9 @@ h2 {
 
 .status-badge {
   flex: none;
-  padding: 0.35rem 0.55rem;
+  padding: 0.2rem 0.42rem;
   border-radius: 999px;
-  font-size: 0.75rem;
+  font-size: 0.66rem;
   font-weight: 800;
 }
 
@@ -432,23 +574,26 @@ h2 {
 }
 
 .status-frozen {
-  color: var(--color-frozen);
-  background: var(--color-frozen-soft);
+  color: var(--color-muted);
+  background: var(--color-surface-raised);
+  box-shadow: inset 0 0 0 1px var(--color-border);
 }
 
-.client-details {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-  margin-top: 1rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--color-border);
+.client-summary {
+  display: flex;
+  min-width: 0;
+  gap: 0.28rem;
+  margin-top: 0.28rem;
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: clamp(0.66rem, 3.15vw, 0.76rem);
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
-.client-details > span {
-  display: grid;
-  gap: 0.2rem;
-}
+.client-summary i { opacity: 0.55; font-style: normal; }
 
 .detail-label {
   color: var(--color-muted);
@@ -466,12 +611,30 @@ h2 {
 .client-note-preview {
   display: block;
   overflow: hidden;
-  margin-top: 0.8rem;
+  margin-top: 0.24rem;
   color: var(--color-muted);
-  font-size: 0.86rem;
-  line-height: 1.35;
+  font-size: 0.7rem;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.floating-action {
+  position: fixed;
+  z-index: 8;
+  right: max(1rem, calc((100vw - 46rem) / 2 + 1rem));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  display: grid;
+  width: 3.5rem;
+  height: 3.5rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
+  box-shadow: var(--shadow-prompt);
+  cursor: pointer;
 }
 
 .back-button {
@@ -560,6 +723,14 @@ h2 {
   border-radius: 1.15rem;
   background: var(--color-surface);
   box-shadow: var(--shadow-card);
+}
+
+.settings-card .batch-freeze-card {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
 }
 
 .batch-freeze-card .section-heading { margin-bottom: 0.65rem; }
