@@ -161,9 +161,33 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
 
     expect(screen.getByRole('heading', { name: 'Настройки' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260829.10')
+    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260830')
     expect(screen.getByRole('heading', { name: 'История версий' })).toBeInTheDocument()
     expect(screen.getByText('Добавлены история версий в настройках и полный формат дат.')).toBeInTheDocument()
+  })
+
+  it('изолирует demo-изменения и явно очищает их при выходе', async () => {
+    const repository = createRepository()
+    vi.mocked(repository.list).mockResolvedValue([client])
+    render(<App repository={repository} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Включить demo-режим' }))
+
+    expect(await screen.findByLabelText('Демонстрационный режим')).toHaveTextContent('Все изменения временные')
+    expect(screen.getByText('28')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Алёна Соколова/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить' }))
+    fireEvent.change(screen.getByLabelText('Текст заметки'), { target: { value: 'Только demo' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить заметку' }))
+
+    await screen.findByText('Только demo')
+    expect(repository.updateNote).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Выйти и очистить' }))
+
+    expect(await screen.findByRole('button', { name: /Анна/ })).toBeInTheDocument()
+    expect(screen.queryByText('Только demo')).not.toBeInTheDocument()
+    expect(repository.list).toHaveBeenCalledTimes(2)
   })
 
   it('возвращается из настроек по системной истории браузера', async () => {

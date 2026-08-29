@@ -12,6 +12,7 @@ import {
   formatDisplayDate, getActiveFreeze, getClientMembershipStatus, localCalendarDate,
 } from './domain/client'
 import type { ClientRepository } from './data/clientRepository'
+import { createDemoClientRepository } from './data/demoClientRepository'
 import { localStorageClientRepository } from './data/localStorageClientRepository'
 
 type AppProps = { repository?: ClientRepository }
@@ -27,6 +28,8 @@ const moneyFormatter = new Intl.NumberFormat('ru-RU', {
 })
 
 function App({ repository = localStorageClientRepository }: AppProps) {
+  const [activeRepository, setActiveRepository] = useState<ClientRepository>(repository)
+  const [isDemoMode, setIsDemoMode] = useState(false)
   const [clients, setClients] = useState<Client[]>([])
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [isAddingClient, setIsAddingClient] = useState(false)
@@ -55,19 +58,19 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const retryClients = async () => {
     setIsLoading(true)
     setError(null)
-    try { setClients(await repository.list()) }
+    try { setClients(await activeRepository.list()) }
     catch { setError('Не удалось открыть данные на этом устройстве.') }
     finally { setIsLoading(false) }
   }
 
   useEffect(() => {
     let isCurrent = true
-    repository.list()
+    activeRepository.list()
       .then((storedClients) => { if (isCurrent) setClients(storedClients) })
       .catch(() => { if (isCurrent) setError('Не удалось открыть данные на этом устройстве.') })
       .finally(() => { if (isCurrent) setIsLoading(false) })
     return () => { isCurrent = false }
-  }, [repository])
+  }, [activeRepository])
 
   useEffect(() => {
     const rootView: AppView = { screen: 'clients' }
@@ -95,7 +98,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
 
   const addClient = async (input: NewClient) => {
     try {
-      const client = await repository.add(input)
+      const client = await activeRepository.add(input)
       setClients((current) => [client, ...current])
       setIsAddingClient(false)
       window.history.replaceState({ ...window.history.state, [HISTORY_STATE_KEY]: { screen: 'clients' } }, '')
@@ -107,7 +110,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const addPayment = async (input: NewPayment) => {
     if (!selectedClient) return
     try {
-      const updatedClient = await repository.addPayment(selectedClient.id, input)
+      const updatedClient = await activeRepository.addPayment(selectedClient.id, input)
       setClients((current) => current.map((client) => client.id === updatedClient.id ? updatedClient : client))
       setIsAddingPayment(false)
       window.history.replaceState({
@@ -122,7 +125,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const updateNote = async (note: string) => {
     if (!selectedClient) return
     try {
-      const updatedClient = await repository.updateNote(selectedClient.id, note)
+      const updatedClient = await activeRepository.updateNote(selectedClient.id, note)
       setClients((current) => current.map((client) => client.id === updatedClient.id ? updatedClient : client))
     } catch {
       throw new Error('Note was not saved')
@@ -132,7 +135,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const freezeMembership = async (input: NewMembershipFreeze) => {
     if (!selectedClient) return
     try {
-      const updatedClient = await repository.freeze(selectedClient.id, input)
+      const updatedClient = await activeRepository.freeze(selectedClient.id, input)
       setClients((current) => current.map((client) => client.id === updatedClient.id ? updatedClient : client))
       setIsAddingFreeze(false)
       window.history.replaceState({
@@ -147,7 +150,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const resumeMembership = async (freezeId: string) => {
     if (!selectedClient) return
     try {
-      const updatedClient = await repository.resume(selectedClient.id, freezeId, localCalendarDate())
+      const updatedClient = await activeRepository.resume(selectedClient.id, freezeId, localCalendarDate())
       setClients((current) => current.map((client) => client.id === updatedClient.id ? updatedClient : client))
     } catch {
       throw new Error('Resume was not saved')
@@ -156,7 +159,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
 
   const freezeBatch = async (input: NewMembershipFreezeBatch) => {
     try {
-      setClients(await repository.freezeBatch(input))
+      setClients(await activeRepository.freezeBatch(input))
       setIsAddingBatchFreeze(false)
       window.history.replaceState({
         ...window.history.state, [HISTORY_STATE_KEY]: { screen: 'clients' },
@@ -167,11 +170,27 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   }
 
   const resumeBatch = async (batchId: string) => {
-    try { setClients(await repository.resumeBatch(batchId, localCalendarDate())) }
+    try { setClients(await activeRepository.resumeBatch(batchId, localCalendarDate())) }
     catch { throw new Error('Freeze batch was not resumed') }
   }
 
   const showClientList = () => {
+    pushView({ screen: 'clients' })
+  }
+
+  const enterDemoMode = () => {
+    setError(null)
+    setIsLoading(true)
+    setIsDemoMode(true)
+    setActiveRepository(createDemoClientRepository())
+    pushView({ screen: 'clients' })
+  }
+
+  const exitDemoMode = () => {
+    setError(null)
+    setIsLoading(true)
+    setIsDemoMode(false)
+    setActiveRepository(repository)
     pushView({ screen: 'clients' })
   }
 
@@ -193,6 +212,11 @@ function App({ repository = localStorageClientRepository }: AppProps) {
         )}
       </header>
 
+      {isDemoMode && <section className="notice demo-notice" aria-label="Демонстрационный режим">
+        <div><strong>Demo-режим</strong><p>Все изменения временные и не затрагивают вашу базу.</p></div>
+        <button className="quiet-button" type="button" onClick={exitDemoMode}>Выйти и очистить</button>
+      </section>}
+
       {error && (
         <section className="notice error-notice" role="alert">
           <div><strong>Данные недоступны</strong><p>{error}</p></div>
@@ -203,7 +227,8 @@ function App({ repository = localStorageClientRepository }: AppProps) {
       {error ? null : isLoading ? (
         <p className="loading" role="status">Загружаем клиентов…</p>
       ) : isSettingsOpen ? (
-        <SettingsScreen onBack={() => window.history.back()} />
+        <SettingsScreen isDemoMode={isDemoMode} onEnableDemo={enterDemoMode} onExitDemo={exitDemoMode}
+          onBack={() => window.history.back()} />
       ) : selectedClient ? (
         <ClientScreen client={selectedClient} isAddingPayment={isAddingPayment} onBack={() => window.history.back()}
           isAddingFreeze={isAddingFreeze} onAddPayment={addPayment} onCancelPayment={() => window.history.back()}
@@ -223,7 +248,12 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   )
 }
 
-function SettingsScreen({ onBack }: { onBack(): void }) {
+function SettingsScreen({ isDemoMode, onEnableDemo, onExitDemo, onBack }: {
+  isDemoMode: boolean
+  onEnableDemo(): void
+  onExitDemo(): void
+  onBack(): void
+}) {
   return <>
     <button className="back-button" type="button" onClick={onBack}>К клиентам</button>
     <section className="page-heading settings-heading" aria-labelledby="settings-title">
@@ -231,6 +261,16 @@ function SettingsScreen({ onBack }: { onBack(): void }) {
     </section>
     <section className="version-summary" aria-label="Текущая версия">
       <span>Текущая версия</span><strong>{CURRENT_APP_VERSION}</strong>
+    </section>
+    <section className="settings-card" aria-labelledby="demo-mode-title">
+      <div><p className="eyebrow">Безопасная проба</p><h2 id="demo-mode-title">Demo-режим</h2></div>
+      <p>{isDemoMode
+        ? 'Сейчас открыта временная база. Выход удалит все сделанные здесь изменения и вернёт ваши данные.'
+        : 'Откройте 28 вымышленных клиентов, чтобы попробовать оплаты, заметки и заморозки. Ваша база не изменится.'}</p>
+      <button className={isDemoMode ? 'quiet-button' : 'primary-button'} type="button"
+        onClick={isDemoMode ? onExitDemo : onEnableDemo}>
+        {isDemoMode ? 'Выйти и очистить demo-данные' : 'Включить demo-режим'}
+      </button>
     </section>
     <section className="history-section" aria-labelledby="version-history-title">
       <div className="section-heading"><div><p className="eyebrow">Что изменилось</p><h2 id="version-history-title">История версий</h2></div></div>
