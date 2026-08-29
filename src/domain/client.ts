@@ -6,16 +6,24 @@ export type NewClient = {
   durationMonths: number
 }
 
+export type NewPayment = {
+  id: string
+  amountRubles: number
+  paidOn: string
+  durationMonths: number
+}
+
+export type Payment = NewPayment & {
+  membershipEndsOn: string
+  createdAt: string
+}
+
 export type Client = {
   id: string
   name: string
   phone: string
   membershipEndsOn: string
-  firstPayment: {
-    amountRubles: number
-    paidOn: string
-    durationMonths: number
-  }
+  payments: Payment[]
   createdAt: string
 }
 
@@ -117,4 +125,30 @@ export function getMembershipStatus(
     return { kind: 'due-soon', label: daysLeft === 0 ? 'Сегодня' : `Осталось ${daysLeft} дн.` }
   }
   return { kind: 'active', label: 'Активен' }
+}
+
+export function renewClient(client: Client, input: NewPayment, createdAt: string): Client {
+  if (!input.id
+    || !Number.isSafeInteger(input.amountRubles)
+    || input.amountRubles <= 0
+    || !Number.isInteger(input.durationMonths)
+    || input.durationMonths < 1
+    || !isCalendarDate(input.paidOn)
+    || !Number.isFinite(Date.parse(createdAt))) {
+    throw new Error('Invalid payment')
+  }
+
+  if (client.payments.some((payment) => payment.id === input.id)) return client
+
+  const membershipStartsOn = input.paidOn > client.membershipEndsOn
+    ? input.paidOn
+    : client.membershipEndsOn
+  const membershipEndsOn = addCalendarMonths(membershipStartsOn, input.durationMonths)
+  const payment: Payment = { ...input, membershipEndsOn, createdAt }
+
+  return {
+    ...client,
+    membershipEndsOn,
+    payments: [payment, ...client.payments],
+  }
 }

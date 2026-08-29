@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addCalendarMonths,
-  formatShortDate,
-  getMembershipStatus,
-  localCalendarDate,
-  normalizeRussianPhone,
-  parseWholeRubles,
+  addCalendarMonths, formatShortDate, getMembershipStatus, localCalendarDate,
+  normalizeRussianPhone, parseWholeRubles, renewClient,
 } from './client'
 
 describe('client domain', () => {
@@ -39,5 +35,21 @@ describe('client domain', () => {
     expect(getMembershipStatus('2026-09-20', '2026-09-10').kind).toBe('active')
     expect(getMembershipStatus('2026-09-17', '2026-09-10').kind).toBe('due-soon')
     expect(getMembershipStatus('2026-09-09', '2026-09-10').kind).toBe('expired')
+  })
+
+  it('продлевает действующий абонемент и не дублирует повторную оплату', () => {
+    const client = {
+      id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67',
+      membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
+      payments: [{
+        id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
+        membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
+      }],
+    }
+    const payment = { id: 'payment-2', amountRubles: 3500, paidOn: '2026-09-20', durationMonths: 1 }
+    const renewed = renewClient(client, payment, '2026-09-20T00:00:00.000Z')
+    expect(renewed.membershipEndsOn).toBe('2026-10-29')
+    expect(renewed.payments).toHaveLength(2)
+    expect(renewClient(renewed, payment, '2026-09-20T00:00:01.000Z')).toBe(renewed)
   })
 })

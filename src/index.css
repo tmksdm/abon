@@ -107,7 +107,11 @@ select:focus-visible {
   display: flex;
   align-items: center;
   gap: 0.625rem;
+  padding: 0;
+  border: 0;
   color: var(--color-text);
+  background: transparent;
+  cursor: pointer;
   font-size: 1.05rem;
   font-weight: 750;
   letter-spacing: -0.01em;
@@ -335,11 +339,16 @@ h2 {
 }
 
 .client-card {
+  display: block;
+  width: 100%;
   padding: 1rem;
   border: 1px solid var(--color-border);
   border-radius: 1.15rem;
+  color: var(--color-text);
   background: var(--color-surface);
   box-shadow: var(--shadow-card);
+  cursor: pointer;
+  text-align: left;
 }
 
 .client-card-heading {
@@ -347,13 +356,19 @@ h2 {
   gap: 1rem;
 }
 
-.client-card-heading div {
+.client-identity {
   display: grid;
   gap: 0.3rem;
   min-width: 0;
 }
 
-.client-card a {
+.client-identity strong {
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+}
+
+.client-identity span,
+.client-phone {
   color: var(--color-muted);
   font-size: 0.88rem;
   text-decoration-thickness: 1px;
@@ -392,12 +407,12 @@ h2 {
   border-top: 1px solid var(--color-border);
 }
 
-.client-details div {
+.client-details > span {
   display: grid;
   gap: 0.2rem;
 }
 
-.client-details dt {
+.detail-label {
   color: var(--color-muted);
   font-size: 0.72rem;
   font-weight: 700;
@@ -405,10 +420,70 @@ h2 {
   letter-spacing: 0.05em;
 }
 
-.client-details dd {
+.client-details strong {
   font-size: 0.92rem;
   font-weight: 720;
 }
+
+.back-button {
+  min-height: 2.75rem;
+  margin-top: 1.25rem;
+  padding: 0;
+  border: 0;
+  color: var(--color-accent);
+  background: transparent;
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.client-page-heading { padding-top: clamp(1.5rem, 6vh, 3rem); }
+.client-page-heading > div { display: grid; gap: 0.35rem; }
+
+.membership-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1.15rem;
+  border-radius: 1.15rem;
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
+}
+
+.membership-summary span { font-size: 0.82rem; font-weight: 700; }
+.membership-summary strong { font-size: 1.35rem; }
+.history-section { margin-top: 2rem; }
+
+.section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 0.8rem;
+}
+
+.payment-list {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 1.15rem;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  list-style: none;
+}
+
+.payment-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.payment-list li + li { border-top: 1px solid var(--color-border); }
+.payment-list li div { display: grid; gap: 0.2rem; }
+.payment-list span,
+.payment-list time { color: var(--color-muted); font-size: 0.82rem; }
 
 .update-prompt {
   position: fixed;
