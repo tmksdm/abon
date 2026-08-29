@@ -13,10 +13,14 @@
 - GitHub Actions настроен на бесплатную публикацию MVP в GitHub Pages после каждого push в `main`.
 - PWA проверяет новую версию и показывает пользователю кнопку «Обновить».
 - Для синхронизации MVP выбран Firebase Spark без платёжной карты; интеграция будет добавлена отдельным этапом.
+- Публичный репозиторий: `https://github.com/tmksdm/abon`.
+- Опубликованный MVP: `https://tmksdm.github.io/abon/`.
 
 ## Проверки
 
 - `npm run check` — успешно: Oxlint без ошибок, 1 тест пройден, TypeScript и production PWA-сборка успешны; service worker и manifest созданы.
+- GitHub Actions run `33251425096` — build и deploy успешны.
+- Опубликованные `/abon/` и `/abon/sw.js` отвечают HTTP 200.
 
 ## Ограничения и блокеры
 
