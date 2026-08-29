@@ -103,6 +103,12 @@ select:focus-visible {
   min-height: 3rem;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -451,6 +457,22 @@ h2 {
   background: var(--color-accent);
 }
 
+.version-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.15rem;
+  border: 1px solid var(--color-border);
+  border-radius: 1.15rem;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.version-summary span { color: var(--color-muted); font-size: 0.82rem; font-weight: 700; }
+.version-summary strong { color: var(--color-accent); font-size: 1.35rem; }
+.settings-heading { padding-bottom: 1rem; }
+
 .membership-summary span { font-size: 0.82rem; font-weight: 700; }
 .membership-summary strong { font-size: 1.35rem; }
 .history-section { margin-top: 2rem; }
@@ -471,6 +493,23 @@ h2 {
   box-shadow: var(--shadow-card);
   list-style: none;
 }
+
+.version-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 1.15rem;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  list-style: none;
+}
+
+.version-list li { display: grid; gap: 0.3rem; padding: 1rem; }
+.version-list li + li { border-top: 1px solid var(--color-border); }
+.version-list strong { color: var(--color-accent); font-size: 0.9rem; }
+.version-list p { color: var(--color-muted); font-size: 0.88rem; line-height: 1.45; }
 
 .payment-list li {
   display: flex;

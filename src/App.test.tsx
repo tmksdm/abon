@@ -51,7 +51,7 @@ describe('App', () => {
       paidOn: '2026-08-29', durationMonths: 1,
     }))
     expect(await screen.findByText('3 000 ₽')).toBeInTheDocument()
-    expect(screen.getByText('26.09.29')).toBeInTheDocument()
+    expect(screen.getByText('29 сентября 2026')).toBeInTheDocument()
   })
 
   it('открывает клиента и продлевает абонемент новой оплатой', async () => {
@@ -67,7 +67,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить оплату' }))
 
     await waitFor(() => expect(repository.addPayment).toHaveBeenCalledTimes(1))
-    expect(await screen.findByText('26.10.29')).toBeInTheDocument()
+    expect(await screen.findByText('29 октября 2026')).toBeInTheDocument()
     expect(screen.getByText('3 500 ₽')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
   })
@@ -78,5 +78,15 @@ describe('App', () => {
     render(<App repository={repository} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('Данные недоступны')
     expect(screen.queryByRole('list', { name: 'Список клиентов' })).not.toBeInTheDocument()
+  })
+
+  it('показывает текущую версию и краткую историю в настройках', async () => {
+    render(<App repository={createRepository()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
+
+    expect(screen.getByRole('heading', { name: 'Настройки' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260829.6')
+    expect(screen.getByRole('heading', { name: 'История версий' })).toBeInTheDocument()
+    expect(screen.getByText('Добавлены история версий в настройках и полный формат дат.')).toBeInTheDocument()
   })
 })

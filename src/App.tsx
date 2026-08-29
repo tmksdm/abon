@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import { APP_VERSIONS, CURRENT_APP_VERSION } from './appVersions'
 import { AddClientForm } from './components/AddClientForm'
 import { AddPaymentForm } from './components/AddPaymentForm'
 import { ReloadPrompt } from './components/ReloadPrompt'
 import type { Client, NewClient, NewPayment } from './domain/client'
-import { formatShortDate, getMembershipStatus } from './domain/client'
+import { formatDisplayDate, getMembershipStatus } from './domain/client'
 import type { ClientRepository } from './data/clientRepository'
 import { localStorageClientRepository } from './data/localStorageClientRepository'
 
@@ -18,6 +19,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [isAddingClient, setIsAddingClient] = useState(false)
   const [isAddingPayment, setIsAddingPayment] = useState(false)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const selectedClient = clients.find((client) => client.id === selectedClientId) ?? null
@@ -63,6 +65,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const showClientList = () => {
     setSelectedClientId(null)
     setIsAddingPayment(false)
+    setIsSettingsOpen(false)
   }
 
   return (
@@ -71,10 +74,13 @@ function App({ repository = localStorageClientRepository }: AppProps) {
         <button className="brand" type="button" onClick={showClientList} aria-label="Abon, список клиентов">
           <span className="brand-mark" aria-hidden="true">A</span><span>Abon</span>
         </button>
-        {selectedClient ? (
+        {isSettingsOpen ? null : selectedClient ? (
           <button className="primary-button topbar-action" type="button" onClick={() => setIsAddingPayment(true)}>Новая оплата</button>
         ) : (
-          <button className="primary-button topbar-action" type="button" onClick={() => setIsAddingClient(true)}>Добавить</button>
+          <div className="topbar-actions">
+            <button className="text-button" type="button" onClick={() => { setIsAddingClient(false); setIsSettingsOpen(true) }}>Настройки</button>
+            <button className="primary-button topbar-action" type="button" onClick={() => setIsAddingClient(true)}>Добавить</button>
+          </div>
         )}
       </header>
 
@@ -87,6 +93,8 @@ function App({ repository = localStorageClientRepository }: AppProps) {
 
       {error ? null : isLoading ? (
         <p className="loading" role="status">Загружаем клиентов…</p>
+      ) : isSettingsOpen ? (
+        <SettingsScreen onBack={showClientList} />
       ) : selectedClient ? (
         <ClientScreen client={selectedClient} isAddingPayment={isAddingPayment} onBack={showClientList}
           onAddPayment={addPayment} onCancelPayment={() => setIsAddingPayment(false)} />
@@ -98,6 +106,26 @@ function App({ repository = localStorageClientRepository }: AppProps) {
       <ReloadPrompt />
     </main>
   )
+}
+
+function SettingsScreen({ onBack }: { onBack(): void }) {
+  return <>
+    <button className="back-button" type="button" onClick={onBack}>К клиентам</button>
+    <section className="page-heading settings-heading" aria-labelledby="settings-title">
+      <div><p className="eyebrow">Приложение</p><h1 id="settings-title">Настройки</h1></div>
+    </section>
+    <section className="version-summary" aria-label="Текущая версия">
+      <span>Текущая версия</span><strong>{CURRENT_APP_VERSION}</strong>
+    </section>
+    <section className="history-section" aria-labelledby="version-history-title">
+      <div className="section-heading"><div><p className="eyebrow">Что изменилось</p><h2 id="version-history-title">История версий</h2></div></div>
+      <ol className="version-list">
+        {APP_VERSIONS.map((release) => <li key={release.version}>
+          <strong>{release.version}</strong><p>{release.summary}</p>
+        </li>)}
+      </ol>
+    </section>
+  </>
 }
 
 type ClientListScreenProps = {
@@ -133,7 +161,7 @@ function ClientListScreen({ clients, isAdding, onAddClient, onStartAdd, onCancel
                 <span className={`status-badge status-${status.kind}`}>{status.label}</span>
               </span>
               <span className="client-details">
-                <span><span className="detail-label">До</span><strong>{formatShortDate(client.membershipEndsOn)}</strong></span>
+                <span><span className="detail-label">До</span><strong>{formatDisplayDate(client.membershipEndsOn)}</strong></span>
                 <span><span className="detail-label">Последняя оплата</span><strong>{moneyFormatter.format(client.payments[0].amountRubles)}</strong></span>
               </span>
             </button>
@@ -163,7 +191,7 @@ function ClientScreen({ client, isAddingPayment, onBack, onAddPayment, onCancelP
       <span className={`status-badge status-${status.kind}`}>{status.label}</span>
     </section>
     <section className="membership-summary" aria-label="Текущий абонемент">
-      <span>Абонемент до</span><strong>{formatShortDate(client.membershipEndsOn)}</strong>
+      <span>Абонемент до</span><strong>{formatDisplayDate(client.membershipEndsOn)}</strong>
     </section>
     {isAddingPayment && <AddPaymentForm onSubmit={onAddPayment} onCancel={onCancelPayment} />}
     <section className="history-section" aria-labelledby="payment-history-title">
@@ -172,7 +200,7 @@ function ClientScreen({ client, isAddingPayment, onBack, onAddPayment, onCancelP
       <ol className="payment-list">
         {payments.map((payment) => <li key={payment.id}>
           <div><strong>{moneyFormatter.format(payment.amountRubles)}</strong><span>{payment.durationMonths} мес.</span></div>
-          <time dateTime={payment.paidOn}>{formatShortDate(payment.paidOn)}</time>
+          <time dateTime={payment.paidOn}>{formatDisplayDate(payment.paidOn)}</time>
         </li>)}
       </ol>
     </section>

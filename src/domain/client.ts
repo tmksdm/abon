@@ -33,6 +33,10 @@ export type MembershipStatus = {
 }
 
 const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
+const MONTH_NAMES = [
+  'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+]
 
 function parseCalendarDate(value: string) {
   const match = CALENDAR_DATE.exec(value)
@@ -103,9 +107,9 @@ export function isCalendarDate(value: string) {
   }
 }
 
-export function formatShortDate(value: string) {
+export function formatDisplayDate(value: string) {
   const { year, month, day } = parseCalendarDate(value)
-  return `${String(year).slice(-2)}.${String(month).padStart(2, '0')}.${String(day).padStart(2, '0')}`
+  return `${day} ${MONTH_NAMES[month - 1]} ${year}`
 }
 
 export function localCalendarDate(date = new Date()) {

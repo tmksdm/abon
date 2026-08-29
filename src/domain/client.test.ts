@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addCalendarMonths, formatShortDate, getMembershipStatus, localCalendarDate,
+  addCalendarMonths, formatDisplayDate, getMembershipStatus, localCalendarDate,
   normalizeRussianPhone, parseWholeRubles, renewClient,
 } from './client'
 
@@ -23,8 +23,8 @@ describe('client domain', () => {
     expect(() => normalizeRussianPhone('тел. 9001234567')).toThrow('Invalid phone')
   })
 
-  it('показывает дату в формате гг.мм.дд', () => {
-    expect(formatShortDate('2026-09-29')).toBe('26.09.29')
+  it('показывает дату с русским названием месяца', () => {
+    expect(formatDisplayDate('2026-09-29')).toBe('29 сентября 2026')
   })
 
   it('берёт сегодняшний день из локального календаря устройства', () => {
