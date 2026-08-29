@@ -1,5 +1,5 @@
 import type {
-  Client, NewClient, NewMembershipFreeze, NewMembershipFreezeBatch, NewPayment,
+  Client, NewClient, NewMembershipFreeze, NewMembershipFreezeBatch, NewPayment, UpdateClient,
 } from '../domain/client'
 import {
   addCalendarDays, addCalendarMonths, freezeClient, localCalendarDate, normalizeRussianPhone,
@@ -63,6 +63,7 @@ export function createDemoClients(today = localCalendarDate()): Client[] {
       membershipEndsOn,
       payments,
       freezes: completedFreeze,
+      archivedAt: null,
       createdAt: timestamp(addCalendarDays(today, -90 - index), 8),
     }
   }).map((client, index) => {
@@ -95,6 +96,10 @@ export function createDemoClientRepository(today = localCalendarDate()): ClientR
     return client
   }
 
+  function ensureActive(index: number) {
+    if (clients[index].archivedAt !== null) throw new Error('Client is archived')
+  }
+
   return {
     async list() {
       return [...clients]
@@ -113,24 +118,53 @@ export function createDemoClientRepository(today = localCalendarDate()): ClientR
           id: crypto.randomUUID(), amountRubles: input.amountRubles, paidOn: input.paidOn,
           durationMonths: input.durationMonths, membershipEndsOn, createdAt,
         }],
-        freezes: [], createdAt,
+        freezes: [], archivedAt: null, createdAt,
       }
       clients = [client, ...clients]
       return client
     },
 
+    async update(clientId: string, input: UpdateClient) {
+      const index = findClientIndex(clientId)
+      ensureActive(index)
+      const name = input.name.trim()
+      if (!name) throw new Error('Invalid client')
+      return replaceClient(index, { ...clients[index], name, phone: normalizeRussianPhone(input.phone) })
+    },
+
+    async archive(clientId: string) {
+      const index = findClientIndex(clientId)
+      if (clients[index].archivedAt !== null) return clients[index]
+      return replaceClient(index, { ...clients[index], archivedAt: new Date().toISOString() })
+    },
+
+    async restore(clientId: string) {
+      const index = findClientIndex(clientId)
+      if (clients[index].archivedAt === null) return clients[index]
+      return replaceClient(index, { ...clients[index], archivedAt: null })
+    },
+
+    async deletePermanently(clientId: string) {
+      const index = findClientIndex(clientId)
+      if (clients[index].archivedAt === null) throw new Error('Client must be archived')
+      clients = clients.filter((client) => client.id !== clientId)
+    },
+
     async addPayment(clientId: string, input: NewPayment) {
       const index = findClientIndex(clientId)
+      ensureActive(index)
       return replaceClient(index, renewClient(clients[index], input, new Date().toISOString()))
     },
 
     async freeze(clientId: string, input: NewMembershipFreeze) {
       const index = findClientIndex(clientId)
+      ensureActive(index)
       return replaceClient(index, freezeClient(clients[index], input, new Date().toISOString()))
     },
 
     async resume(clientId: string, freezeId: string, resumedOn: string) {
       const index = findClientIndex(clientId)
+      ensureActive(index)
       return replaceClient(index, resumeClient(clients[index], freezeId, resumedOn, new Date().toISOString()))
     },
 
@@ -139,6 +173,7 @@ export function createDemoClientRepository(today = localCalendarDate()): ClientR
       previewFreezeBatch(clients, input)
       const createdAt = new Date().toISOString()
       clients = clients.map((client) => {
+        if (client.archivedAt !== null) return client
         try {
           return freezeClient(client, {
             id: `${input.id}:${client.id}`, batchId: input.id,
@@ -155,6 +190,7 @@ export function createDemoClientRepository(today = localCalendarDate()): ClientR
       if (!batchId) throw new Error('Invalid freeze batch')
       const resumedAt = new Date().toISOString()
       clients = clients.map((client) => {
+        if (client.archivedAt !== null) return client
         const freeze = client.freezes.find((item) => item.batchId === batchId && item.resumedOn === null)
         return freeze ? resumeClient(client, freeze.id, resumedOn, resumedAt) : client
       })
@@ -163,6 +199,7 @@ export function createDemoClientRepository(today = localCalendarDate()): ClientR
 
     async updateNote(clientId: string, note: string) {
       const index = findClientIndex(clientId)
+      ensureActive(index)
       return replaceClient(index, { ...clients[index], note: note.trim() })
     },
   }

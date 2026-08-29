@@ -6,6 +6,11 @@ export type NewClient = {
   durationMonths: number
 }
 
+export type UpdateClient = {
+  name: string
+  phone: string
+}
+
 export type NewPayment = {
   id: string
   amountRubles: number
@@ -51,6 +56,7 @@ export type Client = {
   membershipEndsOn: string
   payments: Payment[]
   freezes: MembershipFreeze[]
+  archivedAt: string | null
   createdAt: string
 }
 

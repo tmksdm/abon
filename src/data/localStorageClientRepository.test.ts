@@ -70,7 +70,7 @@ describe('localStorageClientRepository', () => {
       id: 'client-1', payments: [{ id: 'legacy-client-1', amountRubles: 3000 }],
     }])
     expect(window.localStorage.getItem('abon.clients.v1')).not.toBeNull()
-    expect(window.localStorage.getItem('abon.clients.v4')).not.toBeNull()
+    expect(window.localStorage.getItem('abon.clients.v5')).not.toBeNull()
   })
 
   it('переносит данные v2 с пустой заметкой без потери оплат', async () => {
@@ -87,7 +87,7 @@ describe('localStorageClientRepository', () => {
       id: 'client-1', note: '', payments: [{ id: 'payment-1' }],
     }])
     expect(window.localStorage.getItem('abon.clients.v2')).not.toBeNull()
-    expect(window.localStorage.getItem('abon.clients.v4')).not.toBeNull()
+    expect(window.localStorage.getItem('abon.clients.v5')).not.toBeNull()
   })
 
   it('переносит данные v3 с пустой историей заморозок', async () => {
@@ -104,7 +104,71 @@ describe('localStorageClientRepository', () => {
       id: 'client-1', note: 'Вечером', freezes: [],
     }])
     expect(window.localStorage.getItem('abon.clients.v3')).not.toBeNull()
+    expect(window.localStorage.getItem('abon.clients.v5')).not.toBeNull()
+  })
+
+  it('переносит данные v4 с активным статусом и сохраняет исходную запись', async () => {
+    window.localStorage.setItem('abon.clients.v4', JSON.stringify([{
+      id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67', note: 'Вечером', membershipEndsOn: '2026-09-29',
+      payments: [{
+        id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
+        membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
+      }],
+      freezes: [], createdAt: '2026-08-29T00:00:00.000Z',
+    }]))
+
+    await expect(localStorageClientRepository.list()).resolves.toMatchObject([{
+      id: 'client-1', archivedAt: null, payments: [{ id: 'payment-1' }],
+    }])
     expect(window.localStorage.getItem('abon.clients.v4')).not.toBeNull()
+    expect(window.localStorage.getItem('abon.clients.v5')).not.toBeNull()
+  })
+
+  it('редактирует клиента, архивирует и восстанавливает без потери истории', async () => {
+    const client = await localStorageClientRepository.add({
+      name: 'Анна', phone: '9001234567', amountRubles: 3000,
+      paidOn: '2026-08-29', durationMonths: 1,
+    })
+    await localStorageClientRepository.update(client.id, { name: '  Анна Орлова  ', phone: '89007654321' })
+    await localStorageClientRepository.archive(client.id)
+
+    await expect(localStorageClientRepository.list()).resolves.toMatchObject([{
+      id: client.id, name: 'Анна Орлова', phone: '+7 900 765-43-21',
+      archivedAt: expect.any(String), payments: [{ id: 'generated-2' }],
+    }])
+
+    await localStorageClientRepository.restore(client.id)
+    await expect(localStorageClientRepository.list()).resolves.toMatchObject([{
+      id: client.id, archivedAt: null, payments: [{ id: 'generated-2' }],
+    }])
+  })
+
+  it('разрешает окончательное удаление только после архивирования', async () => {
+    const client = await localStorageClientRepository.add({
+      name: 'Анна', phone: '9001234567', amountRubles: 3000,
+      paidOn: '2026-08-29', durationMonths: 1,
+    })
+    await expect(localStorageClientRepository.deletePermanently(client.id)).rejects.toThrow('Client must be archived')
+    await localStorageClientRepository.archive(client.id)
+    await localStorageClientRepository.deletePermanently(client.id)
+    await expect(localStorageClientRepository.list()).resolves.toEqual([])
+  })
+
+  it('не изменяет архивного клиента через рабочие операции', async () => {
+    const client = await localStorageClientRepository.add({
+      name: 'Анна', phone: '9001234567', amountRubles: 3000,
+      paidOn: '2026-08-29', durationMonths: 1,
+    })
+    await localStorageClientRepository.archive(client.id)
+
+    await expect(localStorageClientRepository.updateNote(client.id, 'Новая заметка'))
+      .rejects.toThrow('Client is archived')
+    await expect(localStorageClientRepository.addPayment(client.id, {
+      id: 'payment-2', amountRubles: 3500, paidOn: '2026-09-20', durationMonths: 1,
+    })).rejects.toThrow('Client is archived')
+    await expect(localStorageClientRepository.list()).resolves.toMatchObject([{
+      id: client.id, note: '', payments: [{ id: 'generated-2' }],
+    }])
   })
 
   it('сохраняет обрезанную по краям заметку', async () => {

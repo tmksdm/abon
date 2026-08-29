@@ -8,7 +8,7 @@ import {
 
 function listClient(id: string, name: string, membershipEndsOn: string, freezes: Client['freezes'] = []): Client {
   return {
-    id, name, phone: '+7 900 000-00-00', note: '', membershipEndsOn, freezes,
+    id, name, phone: '+7 900 000-00-00', note: '', membershipEndsOn, freezes, archivedAt: null,
     createdAt: '2026-08-01T00:00:00.000Z',
     payments: [{
       id: `payment-${id}`, amountRubles: 3000, paidOn: '2026-08-01', durationMonths: 1,
@@ -81,7 +81,7 @@ describe('client domain', () => {
     const client = {
       id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67',
       note: '',
-      membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
+      membershipEndsOn: '2026-09-29', archivedAt: null, createdAt: '2026-08-29T00:00:00.000Z',
       freezes: [],
       payments: [{
         id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
@@ -98,7 +98,7 @@ describe('client domain', () => {
   it('переносит срок на период заморозки и при досрочном завершении оставляет только использованные дни', () => {
     const client = {
       id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67', note: '',
-      membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z', freezes: [],
+      membershipEndsOn: '2026-09-29', archivedAt: null, createdAt: '2026-08-29T00:00:00.000Z', freezes: [],
       payments: [{
         id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
         membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
@@ -120,7 +120,7 @@ describe('client domain', () => {
   it('добавляет общей заморозкой только непокрытые дни и согласованно завершает её досрочно', () => {
     const client = {
       id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67', note: '',
-      membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z', freezes: [],
+      membershipEndsOn: '2026-09-29', archivedAt: null, createdAt: '2026-08-29T00:00:00.000Z', freezes: [],
       payments: [{
         id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
         membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
@@ -149,7 +149,7 @@ describe('client domain', () => {
   it('сохраняет общую заморозку без продления, если период покрыт, и подхватывает дни при раннем завершении личной', () => {
     const client = {
       id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67', note: '',
-      membershipEndsOn: '2026-10-09', createdAt: '2026-08-29T00:00:00.000Z',
+      membershipEndsOn: '2026-10-09', archivedAt: null, createdAt: '2026-08-29T00:00:00.000Z',
       payments: [{
         id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
         membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',

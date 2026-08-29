@@ -3,11 +3,13 @@ import { APP_VERSIONS, CURRENT_APP_VERSION } from './appVersions'
 import { AddClientForm } from './components/AddClientForm'
 import { AddPaymentForm } from './components/AddPaymentForm'
 import { BatchFreezeForm } from './components/BatchFreezeForm'
+import { EditClientForm } from './components/EditClientForm'
 import { FreezeMembershipForm } from './components/FreezeMembershipForm'
 import { Icon } from './components/Icon'
 import { ReloadPrompt } from './components/ReloadPrompt'
 import type {
   Client, ClientListFilter, MembershipFreeze, NewClient, NewMembershipFreeze, NewMembershipFreezeBatch, NewPayment,
+  UpdateClient,
 } from './domain/client'
 import {
   formatCompactDate, formatDisplayDate, getActiveFreeze, getClientAttentionSummary,
@@ -21,7 +23,9 @@ type AppProps = { repository?: ClientRepository }
 type AppView =
   | { screen: 'clients'; isAddingClient?: boolean }
   | { screen: 'settings'; isAddingBatchFreeze?: boolean }
-  | { screen: 'client'; clientId: string; isAddingPayment?: boolean; isAddingFreeze?: boolean }
+  | { screen: 'archive' }
+  | { screen: 'client'; clientId: string; isAddingPayment?: boolean; isAddingFreeze?: boolean;
+    isEditingClient?: boolean; isConfirmingArchive?: boolean; isConfirmingDelete?: boolean }
 
 const HISTORY_STATE_KEY = 'abonView'
 
@@ -38,11 +42,17 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const [isAddingBatchFreeze, setIsAddingBatchFreeze] = useState(false)
   const [isAddingPayment, setIsAddingPayment] = useState(false)
   const [isAddingFreeze, setIsAddingFreeze] = useState(false)
+  const [isEditingClient, setIsEditingClient] = useState(false)
+  const [isConfirmingArchive, setIsConfirmingArchive] = useState(false)
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isArchiveOpen, setIsArchiveOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [clientFilter, setClientFilter] = useState<ClientListFilter>('all')
+  const activeClients = clients.filter((client) => client.archivedAt === null)
+  const archivedClients = clients.filter((client) => client.archivedAt !== null)
   const selectedClient = clients.find((client) => client.id === selectedClientId) ?? null
 
   const applyView = (view: AppView) => {
@@ -51,7 +61,11 @@ function App({ repository = localStorageClientRepository }: AppProps) {
     setIsAddingBatchFreeze(view.screen === 'settings' && view.isAddingBatchFreeze === true)
     setIsAddingPayment(view.screen === 'client' && view.isAddingPayment === true)
     setIsAddingFreeze(view.screen === 'client' && view.isAddingFreeze === true)
+    setIsEditingClient(view.screen === 'client' && view.isEditingClient === true)
+    setIsConfirmingArchive(view.screen === 'client' && view.isConfirmingArchive === true)
+    setIsConfirmingDelete(view.screen === 'client' && view.isConfirmingDelete === true)
     setIsSettingsOpen(view.screen === 'settings')
+    setIsArchiveOpen(view.screen === 'archive')
   }
 
   const pushView = (view: AppView) => {
@@ -88,7 +102,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
         return
       }
       const candidate = view as AppView
-      if (candidate.screen === 'clients' || candidate.screen === 'settings'
+      if (candidate.screen === 'clients' || candidate.screen === 'settings' || candidate.screen === 'archive'
         || (candidate.screen === 'client' && typeof candidate.clientId === 'string')) {
         applyView(candidate)
       } else {
@@ -136,6 +150,61 @@ function App({ repository = localStorageClientRepository }: AppProps) {
     }
   }
 
+  const updateClient = async (input: UpdateClient) => {
+    if (!selectedClient) return
+    try {
+      const updatedClient = await activeRepository.update(selectedClient.id, input)
+      setClients((current) => current.map((client) => client.id === updatedClient.id ? updatedClient : client))
+      setIsEditingClient(false)
+      window.history.replaceState({
+        ...window.history.state,
+        [HISTORY_STATE_KEY]: { screen: 'client', clientId: selectedClient.id },
+      }, '')
+    } catch {
+      throw new Error('Client was not updated')
+    }
+  }
+
+  const archiveClient = async () => {
+    if (!selectedClient) return
+    try {
+      const updatedClient = await activeRepository.archive(selectedClient.id)
+      setClients((current) => current.map((client) => client.id === updatedClient.id ? updatedClient : client))
+      const nextView: AppView = { screen: 'clients' }
+      window.history.replaceState({ ...window.history.state, [HISTORY_STATE_KEY]: nextView }, '')
+      applyView(nextView)
+    } catch {
+      throw new Error('Client was not archived')
+    }
+  }
+
+  const restoreClient = async () => {
+    if (!selectedClient) return
+    try {
+      const updatedClient = await activeRepository.restore(selectedClient.id)
+      setClients((current) => current.map((client) => client.id === updatedClient.id ? updatedClient : client))
+      const nextView: AppView = { screen: 'clients' }
+      window.history.replaceState({ ...window.history.state, [HISTORY_STATE_KEY]: nextView }, '')
+      applyView(nextView)
+    } catch {
+      throw new Error('Client was not restored')
+    }
+  }
+
+  const deleteClientPermanently = async () => {
+    if (!selectedClient) return
+    const deletedId = selectedClient.id
+    try {
+      await activeRepository.deletePermanently(deletedId)
+      setClients((current) => current.filter((client) => client.id !== deletedId))
+      const nextView: AppView = { screen: 'archive' }
+      window.history.replaceState({ ...window.history.state, [HISTORY_STATE_KEY]: nextView }, '')
+      applyView(nextView)
+    } catch {
+      throw new Error('Client was not deleted')
+    }
+  }
+
   const freezeMembership = async (input: NewMembershipFreeze) => {
     if (!selectedClient) return
     try {
@@ -179,10 +248,6 @@ function App({ repository = localStorageClientRepository }: AppProps) {
     catch { throw new Error('Freeze batch was not resumed') }
   }
 
-  const showClientList = () => {
-    pushView({ screen: 'clients' })
-  }
-
   const enterDemoMode = () => {
     setError(null)
     setIsLoading(true)
@@ -201,17 +266,14 @@ function App({ repository = localStorageClientRepository }: AppProps) {
 
   return (
     <main className="app-shell">
-      <header className="topbar">
-        {!isSettingsOpen && !selectedClient ? <>
-          <div className="home-title"><span className="brand-mark" aria-hidden="true">A</span><h1>Клиенты</h1><span className="client-count">{clients.length}</span>
+      {!isSettingsOpen && !isArchiveOpen && !selectedClient && <header className="topbar">
+        <>
+          <div className="home-title"><h1>Клиенты</h1><span className="client-count">{activeClients.length}</span>
             {isDemoMode && <span className="demo-badge">Demo</span>}</div>
           <button className="icon-button" type="button" aria-label="Настройки"
             onClick={() => pushView({ screen: 'settings' })}><Icon name="settings" /></button>
-        </> : <button className="brand" type="button" onClick={showClientList} aria-label="Abon, список клиентов">
-          <span className="brand-mark" aria-hidden="true">A</span><span>Abon</span>
-          {isDemoMode && <span className="demo-badge">Demo</span>}
-        </button>}
-      </header>
+        </>
+      </header>}
 
       {error && (
         <section className="notice error-notice" role="alert">
@@ -223,30 +285,41 @@ function App({ repository = localStorageClientRepository }: AppProps) {
       {error ? null : isLoading ? (
         <p className="loading" role="status">Загружаем клиентов…</p>
       ) : isSettingsOpen ? (
-        <SettingsScreen clients={clients} isDemoMode={isDemoMode} isAddingBatchFreeze={isAddingBatchFreeze}
+        <SettingsScreen clients={activeClients} archivedCount={archivedClients.length} isDemoMode={isDemoMode} isAddingBatchFreeze={isAddingBatchFreeze}
           onEnableDemo={enterDemoMode} onExitDemo={exitDemoMode} onFreezeBatch={freezeBatch} onResumeBatch={resumeBatch}
+          onOpenArchive={() => pushView({ screen: 'archive' })}
           onStartBatchFreeze={() => pushView({ screen: 'settings', isAddingBatchFreeze: true })}
           onCancelBatchFreeze={() => window.history.back()}
           onBack={() => window.history.back()} />
+      ) : isArchiveOpen ? (
+        <ArchiveScreen clients={archivedClients} isDemoMode={isDemoMode} onBack={() => window.history.back()}
+          onOpenClient={(clientId) => pushView({ screen: 'client', clientId })} />
       ) : selectedClient ? (
-        <ClientScreen client={selectedClient} isAddingPayment={isAddingPayment} onBack={() => window.history.back()}
+        <ClientScreen client={selectedClient} isDemoMode={isDemoMode} isAddingPayment={isAddingPayment} onBack={() => window.history.back()}
           isAddingFreeze={isAddingFreeze} onAddPayment={addPayment} onCancelPayment={() => window.history.back()}
           onStartFreeze={() => pushView({ screen: 'client', clientId: selectedClient.id, isAddingFreeze: true })}
           onFreeze={freezeMembership} onCancelFreeze={() => window.history.back()} onResume={resumeMembership}
-          onUpdateNote={updateNote} />
+          onUpdateNote={updateNote} isEditingClient={isEditingClient} onUpdateClient={updateClient}
+          onStartEdit={() => pushView({ screen: 'client', clientId: selectedClient.id, isEditingClient: true })}
+          onCancelEdit={() => window.history.back()} isConfirmingArchive={isConfirmingArchive}
+          onStartArchive={() => pushView({ screen: 'client', clientId: selectedClient.id, isConfirmingArchive: true })}
+          onCancelArchive={() => window.history.back()} onArchive={archiveClient} onRestore={restoreClient}
+          isConfirmingDelete={isConfirmingDelete}
+          onStartDelete={() => pushView({ screen: 'client', clientId: selectedClient.id, isConfirmingDelete: true })}
+          onCancelDelete={() => window.history.back()} onDeletePermanently={deleteClientPermanently} />
       ) : (
-        <ClientListScreen clients={clients} query={searchQuery} filter={clientFilter}
+        <ClientListScreen clients={activeClients} query={searchQuery} filter={clientFilter}
           isAdding={isAddingClient}
           onQueryChange={setSearchQuery} onFilterChange={setClientFilter}
           onAddClient={addClient}
           onStartAdd={() => pushView({ screen: 'clients', isAddingClient: true })} onCancelAdd={() => window.history.back()}
           onOpenClient={(clientId) => pushView({ screen: 'client', clientId })} />
       )}
-      {!error && !isLoading && !isSettingsOpen && !isAddingClient && !isAddingPayment && (
-        selectedClient ? <button className="floating-action" type="button" aria-label="Новая оплата"
+      {!error && !isLoading && !isSettingsOpen && !isArchiveOpen && !isAddingClient && !isAddingPayment && (
+        selectedClient && selectedClient.archivedAt === null ? <button className="floating-action" type="button" aria-label="Новая оплата"
           onClick={() => pushView({ screen: 'client', clientId: selectedClient.id, isAddingPayment: true })}>
           <Icon name="add" size={28} /></button>
-          : clients.length > 0 && <button className="floating-action" type="button" aria-label="Добавить клиента"
+          : !selectedClient && activeClients.length > 0 && <button className="floating-action" type="button" aria-label="Добавить клиента"
             onClick={() => pushView({ screen: 'clients', isAddingClient: true })}><Icon name="add" size={28} /></button>
       )}
       <ReloadPrompt />
@@ -255,10 +328,11 @@ function App({ repository = localStorageClientRepository }: AppProps) {
 }
 
 function SettingsScreen({
-  clients, isDemoMode, isAddingBatchFreeze, onEnableDemo, onExitDemo, onFreezeBatch,
-  onStartBatchFreeze, onCancelBatchFreeze, onResumeBatch, onBack,
+  clients, archivedCount, isDemoMode, isAddingBatchFreeze, onEnableDemo, onExitDemo, onFreezeBatch,
+  onStartBatchFreeze, onCancelBatchFreeze, onResumeBatch, onOpenArchive, onBack,
 }: {
   clients: Client[]
+  archivedCount: number
   isDemoMode: boolean
   isAddingBatchFreeze: boolean
   onEnableDemo(): void
@@ -267,14 +341,12 @@ function SettingsScreen({
   onStartBatchFreeze(): void
   onCancelBatchFreeze(): void
   onResumeBatch(batchId: string): Promise<void>
+  onOpenArchive(): void
   onBack(): void
 }) {
   const activeBatch = findCurrentFreezeBatch(clients)
   return <>
-    <button className="back-button" type="button" onClick={onBack}>К клиентам</button>
-    <section className="page-heading settings-heading" aria-labelledby="settings-title">
-      <div><p className="eyebrow">Приложение</p><h1 id="settings-title">Настройки</h1></div>
-    </section>
+    <ScreenHeader title="Настройки" isDemoMode={isDemoMode} onBack={onBack} />
     <section className="version-summary" aria-label="Текущая версия">
       <span>Текущая версия</span><strong>{CURRENT_APP_VERSION}</strong>
     </section>
@@ -296,6 +368,13 @@ function SettingsScreen({
       {activeBatch && <BatchFreezeSummary batch={activeBatch} onResume={onResumeBatch} />}
       {isAddingBatchFreeze && <BatchFreezeForm clients={clients} onSubmit={onFreezeBatch} onCancel={onCancelBatchFreeze} />}
     </section>
+    <section className="settings-card" aria-labelledby="archive-settings-title">
+      <div><p className="eyebrow">Неактивные записи</p><h2 id="archive-settings-title">Архив</h2></div>
+      <p>Архивные клиенты не видны в рабочем списке, но их данные и история сохранены.</p>
+      <button className="quiet-button" type="button" onClick={onOpenArchive}>
+        Открыть архив{archivedCount > 0 ? ` · ${archivedCount}` : ''}
+      </button>
+    </section>
     <section className="history-section" aria-labelledby="version-history-title">
       <div className="section-heading"><div><p className="eyebrow">Что изменилось</p><h2 id="version-history-title">История версий</h2></div></div>
       <ol className="version-list">
@@ -304,6 +383,43 @@ function SettingsScreen({
         </li>)}
       </ol>
     </section>
+  </>
+}
+
+function ArchiveScreen({
+  clients, isDemoMode, onBack, onOpenClient,
+}: {
+  clients: Client[]
+  isDemoMode: boolean
+  onBack(): void
+  onOpenClient(clientId: string): void
+}) {
+  const [query, setQuery] = useState('')
+  const normalizedQuery = query.trim().toLocaleLowerCase('ru-RU')
+  const visibleClients = [...clients]
+    .filter((client) => normalizedQuery === '' || client.name.toLocaleLowerCase('ru-RU').includes(normalizedQuery))
+    .sort((left, right) => left.name.localeCompare(right.name, 'ru'))
+
+  return <>
+    <ScreenHeader title="Архив" count={clients.length} isDemoMode={isDemoMode} onBack={onBack} />
+    {clients.length > 0 && <label className="search-field archive-search">
+      <span className="visually-hidden">Поиск в архиве</span><Icon name="search" />
+      <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по имени" />
+    </label>}
+    {clients.length === 0 ? <section className="empty-state compact-empty-state">
+      <h2>Архив пуст</h2><p>Здесь появятся клиенты, которых вы уберёте из рабочего списка.</p>
+    </section> : visibleClients.length === 0 ? <section className="no-results">
+      <h2>Никого не нашли</h2><p>Проверьте имя или сбросьте поиск.</p>
+      <button className="text-button" type="button" onClick={() => setQuery('')}>Сбросить</button>
+    </section> : <ul className="client-list archive-list" aria-label="Архив клиентов">
+      {visibleClients.map((client) => <li key={client.id}>
+        <button className="client-card" type="button" onClick={() => onOpenClient(client.id)}>
+          <span className="client-card-heading"><span className="client-identity"><strong>{client.name}</strong></span>
+            <span className="status-badge status-archived">В архиве</span></span>
+          <span className="client-summary">История: {client.payments.length} оплат, {client.freezes.length} заморозок</span>
+        </button>
+      </li>)}
+    </ul>}
   </>
 }
 
@@ -331,7 +447,7 @@ function ClientListScreen({
       type="button" aria-pressed={filter === 'attention'}
       onClick={() => onFilterChange(filter === 'attention' ? 'all' : 'attention')}>
       <span className="attention-count" aria-hidden="true">{attention.total}</span>
-      <span><strong>{attention.total} {clientWord(attention.total)} требуют продления</strong>
+      <span><strong>Требуют продления</strong>
         <small>{attention.overdue} просроч. · {attention.dueSoon} до 7 дней</small></span>
       <Icon name="filter" />
     </button>}
@@ -390,15 +506,6 @@ function membershipLabel(months: number) {
   if (months === 1) return 'Месяц'
   if (months === 12) return 'Год'
   return `${months} мес.`
-}
-
-function clientWord(count: number) {
-  const lastTwo = count % 100
-  if (lastTwo >= 11 && lastTwo <= 19) return 'клиентов'
-  const last = count % 10
-  if (last === 1) return 'клиент'
-  if (last >= 2 && last <= 4) return 'клиента'
-  return 'клиентов'
 }
 
 type FreezeBatchSummary = {
@@ -461,6 +568,7 @@ function BatchFreezeSummary({
 
 type ClientScreenProps = {
   client: Client
+  isDemoMode: boolean
   isAddingPayment: boolean
   isAddingFreeze: boolean
   onBack(): void
@@ -471,35 +579,90 @@ type ClientScreenProps = {
   onCancelFreeze(): void
   onResume(freezeId: string): Promise<void>
   onUpdateNote(note: string): Promise<void>
+  isEditingClient: boolean
+  onStartEdit(): void
+  onUpdateClient(input: UpdateClient): Promise<void>
+  onCancelEdit(): void
+  isConfirmingArchive: boolean
+  onStartArchive(): void
+  onCancelArchive(): void
+  onArchive(): Promise<void>
+  onRestore(): Promise<void>
+  isConfirmingDelete: boolean
+  onStartDelete(): void
+  onCancelDelete(): void
+  onDeletePermanently(): Promise<void>
 }
 
 function ClientScreen({
-  client, isAddingPayment, isAddingFreeze, onBack, onAddPayment, onCancelPayment,
+  client, isDemoMode, isAddingPayment, isAddingFreeze, onBack, onAddPayment, onCancelPayment,
   onStartFreeze, onFreeze, onCancelFreeze, onResume, onUpdateNote,
+  isEditingClient, onStartEdit, onUpdateClient, onCancelEdit, isConfirmingArchive,
+  onStartArchive, onCancelArchive, onArchive, onRestore, isConfirmingDelete,
+  onStartDelete, onCancelDelete, onDeletePermanently,
 }: ClientScreenProps) {
   const status = getClientMembershipStatus(client)
+  const isArchived = client.archivedAt !== null
+  const [isActionSaving, setIsActionSaving] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
   const activeFreeze = getActiveFreeze(client)
   const upcomingFreeze = client.freezes.find((freeze) => freeze.resumedOn === null && freeze.startsOn > localCalendarDate()) ?? null
   const operations = [
     ...client.payments.map((payment) => ({ kind: 'payment' as const, occurredOn: payment.paidOn, createdAt: payment.createdAt, payment })),
     ...client.freezes.map((freeze) => ({ kind: 'freeze' as const, occurredOn: freeze.startsOn, createdAt: freeze.createdAt, freeze })),
   ].sort((left, right) => right.occurredOn.localeCompare(left.occurredOn) || right.createdAt.localeCompare(left.createdAt))
+  const runAction = async (action: () => Promise<void>, errorMessage: string) => {
+    setIsActionSaving(true)
+    setActionError(null)
+    try { await action() }
+    catch { setActionError(errorMessage); setIsActionSaving(false) }
+  }
   return <>
-    <button className="back-button" type="button" onClick={onBack}>К списку</button>
-    <section className="page-heading client-page-heading" aria-labelledby="client-title">
-      <div><p className="eyebrow">Карточка клиента</p><h1 id="client-title">{client.name}</h1>
+    <ScreenHeader title="Клиент" isDemoMode={isDemoMode} onBack={onBack} />
+    <section className="client-identity-card" aria-labelledby="client-title">
+      <div className="client-identity-main"><div><h1 id="client-title">{client.name}</h1>
         <a className="client-phone" href={`tel:${client.phone}`}>{client.phone}</a></div>
-      <span className={`status-badge status-${status.kind}`}>{status.label}</span>
+        <span className={`status-badge status-${isArchived ? 'archived' : status.kind}`}>
+          {isArchived ? 'В архиве' : status.label}
+        </span></div>
+      {isArchived ? <>
+        <p className="empty-note">Клиент скрыт из рабочего списка. Вся история сохранена.</p>
+        <div className="record-actions">
+          <button className="primary-button" type="button" disabled={isActionSaving}
+            onClick={() => void runAction(onRestore, 'Не удалось вернуть клиента. Попробуйте ещё раз.')}>
+            {isActionSaving ? 'Сохраняем…' : 'Вернуть в рабочий список'}
+          </button>
+          {!isConfirmingDelete && <button className="danger-text-button" type="button" onClick={onStartDelete}>Удалить окончательно</button>}
+        </div>
+        {isConfirmingDelete && <ConfirmationPanel title="Удалить клиента безвозвратно?"
+          text="Имя, телефон, оплаты, заметка и история заморозок будут удалены. Отменить это действие нельзя."
+          confirmLabel="Удалить безвозвратно" isSaving={isActionSaving} onCancel={onCancelDelete}
+          onConfirm={() => void runAction(onDeletePermanently, 'Не удалось удалить клиента. Попробуйте ещё раз.')} />}
+      </> : <>
+        <div className="record-actions">
+          <button className="quiet-button" type="button" onClick={onStartEdit}>Изменить данные</button>
+          {!isConfirmingArchive && <button className="danger-text-button" type="button" onClick={onStartArchive}>Архивировать</button>}
+        </div>
+        {isConfirmingArchive && <ConfirmationPanel title="Убрать клиента в архив?"
+          text="Клиент исчезнет из рабочего списка, но данные и история сохранятся. Его можно будет вернуть."
+          confirmLabel="Архивировать" isSaving={isActionSaving} onCancel={onCancelArchive}
+          onConfirm={() => void runAction(onArchive, 'Не удалось архивировать клиента. Попробуйте ещё раз.')} />}
+      </>}
+      {actionError && <p className="field-error" role="alert">{actionError}</p>}
     </section>
+    {isEditingClient && <EditClientForm client={client} onSubmit={onUpdateClient} onCancel={onCancelEdit} />}
     <section className="membership-summary" aria-label="Текущий абонемент">
       <span>Абонемент до</span><strong>{formatDisplayDate(client.membershipEndsOn)}</strong>
     </section>
-    <FreezeSummary freeze={activeFreeze ?? upcomingFreeze} isActive={activeFreeze !== null}
+    {!isArchived && <FreezeSummary freeze={activeFreeze ?? upcomingFreeze} isActive={activeFreeze !== null}
       canStart={!isAddingFreeze && status.kind !== 'expired' && activeFreeze === null && upcomingFreeze === null}
-      onStart={onStartFreeze} onResume={onResume} />
-    {isAddingFreeze && <FreezeMembershipForm onSubmit={onFreeze} onCancel={onCancelFreeze} />}
-    <ClientNote note={client.note} onSave={onUpdateNote} />
-    {isAddingPayment && <AddPaymentForm onSubmit={onAddPayment} onCancel={onCancelPayment} />}
+      onStart={onStartFreeze} onResume={onResume} />}
+    {isAddingFreeze && !isArchived && <FreezeMembershipForm onSubmit={onFreeze} onCancel={onCancelFreeze} />}
+    {!isArchived && <ClientNote note={client.note} onSave={onUpdateNote} />}
+    {isArchived && client.note && <section className="note-card" aria-labelledby="archived-client-note-title">
+      <div className="section-heading"><h2 id="archived-client-note-title">Заметка</h2></div><p className="client-note">{client.note}</p>
+    </section>}
+    {isAddingPayment && !isArchived && <AddPaymentForm onSubmit={onAddPayment} onCancel={onCancelPayment} />}
     <section className="history-section" aria-labelledby="operation-history-title">
       <div className="section-heading"><div><p className="eyebrow">Все изменения срока</p><h2 id="operation-history-title">История операций</h2></div>
         <span className="client-count">{operations.length}</span></div>
@@ -514,6 +677,43 @@ function ClientScreen({
       </ol>
     </section>
   </>
+}
+
+function ScreenHeader({
+  title, count, isDemoMode, onBack,
+}: {
+  title: string
+  count?: number
+  isDemoMode: boolean
+  onBack(): void
+}) {
+  return <header className="screen-header">
+    <button className="screen-back-button" type="button" onClick={onBack} aria-label="Назад"><Icon name="arrow-back" /></button>
+    <h1>{title}</h1>
+    {count !== undefined && <span className="client-count">{count}</span>}
+    {isDemoMode && <span className="demo-badge">Demo</span>}
+  </header>
+}
+
+function ConfirmationPanel({
+  title, text, confirmLabel, isSaving, onCancel, onConfirm,
+}: {
+  title: string
+  text: string
+  confirmLabel: string
+  isSaving: boolean
+  onCancel(): void
+  onConfirm(): void
+}) {
+  return <section className="confirmation-panel" role="alertdialog" aria-labelledby="confirmation-title" aria-describedby="confirmation-text">
+    <strong id="confirmation-title">{title}</strong><p id="confirmation-text">{text}</p>
+    <div className="form-actions">
+      <button className="quiet-button" type="button" disabled={isSaving} onClick={onCancel}>Отмена</button>
+      <button className="danger-button" type="button" disabled={isSaving} onClick={onConfirm}>
+        {isSaving ? 'Сохраняем…' : confirmLabel}
+      </button>
+    </div>
+  </section>
 }
 
 function FreezeSummary({

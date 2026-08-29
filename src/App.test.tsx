@@ -12,6 +12,7 @@ const client: Client = {
   note: '',
   membershipEndsOn: '2026-09-29',
   freezes: [],
+  archivedAt: null,
   payments: [{
     id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
     membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
@@ -23,6 +24,10 @@ function createRepository(): ClientRepository {
   return {
     list: vi.fn().mockResolvedValue([]),
     add: vi.fn().mockResolvedValue(client),
+    update: vi.fn().mockImplementation(async (_clientId, input) => ({ ...client, ...input })),
+    archive: vi.fn().mockResolvedValue({ ...client, archivedAt: '2026-08-30T00:00:00.000Z' }),
+    restore: vi.fn().mockResolvedValue(client),
+    deletePermanently: vi.fn().mockResolvedValue(undefined),
     addPayment: vi.fn().mockImplementation(async (_clientId, input) => ({
       ...client,
       membershipEndsOn: '2026-10-29',
@@ -150,7 +155,7 @@ describe('App', () => {
       expect.stringContaining('Орлов Юрий'), expect.stringContaining('Белова Дарья'),
       expect.stringContaining('Соколов Егор'), expect.stringContaining('Воронова Майя'),
     ])
-    expect(screen.getByRole('button', { name: /2 клиента требуют продления/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Требуют продления/ })).toBeInTheDocument()
     expect(screen.queryByText('+7 900 123-45-67')).not.toBeInTheDocument()
     expect(within(list).getAllByRole('button')[0]).toHaveTextContent('Месяц')
 
@@ -175,8 +180,68 @@ describe('App', () => {
       'client-1', '  Предпочитает вечерние тренировки\nПозвонить заранее.  ',
     ))
     expect(await screen.findByText(/Предпочитает вечерние тренировки/)).toHaveTextContent('Предпочитает вечерние тренировки Позвонить заранее.')
-    fireEvent.click(screen.getByRole('button', { name: 'Abon, список клиентов' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Назад' }))
     await waitFor(() => expect(screen.getByText(/Предпочитает вечерние тренировки/)).toHaveClass('client-note-preview'))
+  })
+
+  it('редактирует имя и телефон без потери истории операций', async () => {
+    const repository = createRepository()
+    vi.mocked(repository.list).mockResolvedValue([client])
+    render(<App repository={repository} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Анна/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить данные' }))
+    fireEvent.change(screen.getByLabelText('Имя'), { target: { value: 'Анна Орлова' } })
+    fireEvent.change(screen.getByLabelText('Телефон'), { target: { value: '89007654321' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => expect(repository.update).toHaveBeenCalledWith('client-1', {
+      name: 'Анна Орлова', phone: '+7 900 765-43-21',
+    }))
+    expect(await screen.findByRole('heading', { name: 'Анна Орлова' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'История операций' })).toBeInTheDocument()
+    expect(screen.getByText('3 000 ₽')).toBeInTheDocument()
+  })
+
+  it('архивирует только после подтверждения, находит в архиве и восстанавливает', async () => {
+    const repository = createRepository()
+    vi.mocked(repository.list).mockResolvedValue([client])
+    render(<App repository={repository} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Анна/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Архивировать' }))
+    expect(repository.archive).not.toHaveBeenCalled()
+    expect(screen.getByText(/данные и история сохранятся/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Архивировать' }))
+    await waitFor(() => expect(repository.archive).toHaveBeenCalledWith('client-1'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Настройки' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть архив · 1' }))
+    fireEvent.change(screen.getByPlaceholderText('Поиск по имени'), { target: { value: 'анн' } })
+    fireEvent.click(screen.getByRole('button', { name: /Анна/ }))
+    expect(screen.getByText('3 000 ₽')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуть в рабочий список' }))
+
+    await waitFor(() => expect(repository.restore).toHaveBeenCalledWith('client-1'))
+    expect(await screen.findByRole('button', { name: /Анна/ })).toBeInTheDocument()
+  })
+
+  it('удаляет архивного клиента только после отдельного безвозвратного подтверждения', async () => {
+    const repository = createRepository()
+    const archivedClient = { ...client, archivedAt: '2026-08-30T00:00:00.000Z' }
+    vi.mocked(repository.list).mockResolvedValue([archivedClient])
+    render(<App repository={repository} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть архив · 1' }))
+    fireEvent.click(screen.getByRole('button', { name: /Анна/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить окончательно' }))
+    expect(repository.deletePermanently).not.toHaveBeenCalled()
+    expect(screen.getByText(/Отменить это действие нельзя/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить безвозвратно' }))
+
+    await waitFor(() => expect(repository.deletePermanently).toHaveBeenCalledWith('client-1'))
+    expect(await screen.findByRole('heading', { name: 'Архив пуст' })).toBeInTheDocument()
   })
 
   it('не раскрывает данные при ошибке чтения', async () => {
@@ -192,7 +257,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
 
     expect(screen.getByRole('heading', { name: 'Настройки' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260830.2')
+    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260830.3')
     expect(screen.getByRole('heading', { name: 'История версий' })).toBeInTheDocument()
     expect(screen.getByText('Добавлены история версий в настройках и полный формат дат.')).toBeInTheDocument()
   })
@@ -214,8 +279,8 @@ describe('App', () => {
 
     await screen.findByText('Только demo')
     expect(repository.updateNote).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Abon, список клиентов' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Настройки' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Назад' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
     fireEvent.click(screen.getByRole('button', { name: 'Выйти и очистить demo-данные' }))
 
     expect(await screen.findByRole('button', { name: /Анна/ })).toBeInTheDocument()
