@@ -89,7 +89,7 @@ describe('App', () => {
     ))
     expect(await screen.findByText(/Предпочитает вечерние тренировки/)).toHaveTextContent('Предпочитает вечерние тренировки Позвонить заранее.')
     fireEvent.click(screen.getByRole('button', { name: 'К списку' }))
-    expect(screen.getByText(/Предпочитает вечерние тренировки/)).toHaveClass('client-note-preview')
+    await waitFor(() => expect(screen.getByText(/Предпочитает вечерние тренировки/)).toHaveClass('client-note-preview'))
   })
 
   it('не раскрывает данные при ошибке чтения', async () => {
@@ -105,8 +105,21 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
 
     expect(screen.getByRole('heading', { name: 'Настройки' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260829.7')
+    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260829.8')
     expect(screen.getByRole('heading', { name: 'История версий' })).toBeInTheDocument()
     expect(screen.getByText('Добавлены история версий в настройках и полный формат дат.')).toBeInTheDocument()
+  })
+
+  it('возвращается из настроек по системной истории браузера', async () => {
+    render(<App repository={createRepository()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
+    expect(screen.getByRole('heading', { name: 'Настройки' })).toBeInTheDocument()
+
+    fireEvent(window, new PopStateEvent('popstate', {
+      state: { abonView: { screen: 'clients' } },
+    }))
+
+    expect(screen.getByRole('heading', { name: 'Клиенты' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Настройки' })).not.toBeInTheDocument()
   })
 })

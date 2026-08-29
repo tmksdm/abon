@@ -9,6 +9,12 @@ import type { ClientRepository } from './data/clientRepository'
 import { localStorageClientRepository } from './data/localStorageClientRepository'
 
 type AppProps = { repository?: ClientRepository }
+type AppView =
+  | { screen: 'clients'; isAddingClient?: boolean }
+  | { screen: 'settings' }
+  | { screen: 'client'; clientId: string; isAddingPayment?: boolean }
+
+const HISTORY_STATE_KEY = 'abonView'
 
 const moneyFormatter = new Intl.NumberFormat('ru-RU', {
   style: 'currency', currency: 'RUB', maximumFractionDigits: 0,
@@ -23,6 +29,18 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const selectedClient = clients.find((client) => client.id === selectedClientId) ?? null
+
+  const applyView = (view: AppView) => {
+    setSelectedClientId(view.screen === 'client' ? view.clientId : null)
+    setIsAddingClient(view.screen === 'clients' && view.isAddingClient === true)
+    setIsAddingPayment(view.screen === 'client' && view.isAddingPayment === true)
+    setIsSettingsOpen(view.screen === 'settings')
+  }
+
+  const pushView = (view: AppView) => {
+    window.history.pushState({ ...window.history.state, [HISTORY_STATE_KEY]: view }, '')
+    applyView(view)
+  }
 
   const retryClients = async () => {
     setIsLoading(true)
@@ -41,11 +59,36 @@ function App({ repository = localStorageClientRepository }: AppProps) {
     return () => { isCurrent = false }
   }, [repository])
 
+  useEffect(() => {
+    const rootView: AppView = { screen: 'clients' }
+    window.history.replaceState({ ...window.history.state, [HISTORY_STATE_KEY]: rootView }, '')
+
+    const restoreView = (event: PopStateEvent) => {
+      const state = event.state as Record<string, unknown> | null
+      const view = state?.[HISTORY_STATE_KEY]
+      if (!view || typeof view !== 'object' || !('screen' in view)) {
+        applyView(rootView)
+        return
+      }
+      const candidate = view as AppView
+      if (candidate.screen === 'clients' || candidate.screen === 'settings'
+        || (candidate.screen === 'client' && typeof candidate.clientId === 'string')) {
+        applyView(candidate)
+      } else {
+        applyView(rootView)
+      }
+    }
+
+    window.addEventListener('popstate', restoreView)
+    return () => window.removeEventListener('popstate', restoreView)
+  }, [])
+
   const addClient = async (input: NewClient) => {
     try {
       const client = await repository.add(input)
       setClients((current) => [client, ...current])
       setIsAddingClient(false)
+      window.history.replaceState({ ...window.history.state, [HISTORY_STATE_KEY]: { screen: 'clients' } }, '')
     } catch {
       throw new Error('Client was not saved')
     }
@@ -57,6 +100,10 @@ function App({ repository = localStorageClientRepository }: AppProps) {
       const updatedClient = await repository.addPayment(selectedClient.id, input)
       setClients((current) => current.map((client) => client.id === updatedClient.id ? updatedClient : client))
       setIsAddingPayment(false)
+      window.history.replaceState({
+        ...window.history.state,
+        [HISTORY_STATE_KEY]: { screen: 'client', clientId: selectedClient.id },
+      }, '')
     } catch {
       throw new Error('Payment was not saved')
     }
@@ -73,9 +120,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   }
 
   const showClientList = () => {
-    setSelectedClientId(null)
-    setIsAddingPayment(false)
-    setIsSettingsOpen(false)
+    pushView({ screen: 'clients' })
   }
 
   return (
@@ -85,11 +130,13 @@ function App({ repository = localStorageClientRepository }: AppProps) {
           <span className="brand-mark" aria-hidden="true">A</span><span>Abon</span>
         </button>
         {isSettingsOpen ? null : selectedClient ? (
-          <button className="primary-button topbar-action" type="button" onClick={() => setIsAddingPayment(true)}>Новая оплата</button>
+          <button className="primary-button topbar-action" type="button"
+            onClick={() => pushView({ screen: 'client', clientId: selectedClient.id, isAddingPayment: true })}>Новая оплата</button>
         ) : (
           <div className="topbar-actions">
-            <button className="text-button" type="button" onClick={() => { setIsAddingClient(false); setIsSettingsOpen(true) }}>Настройки</button>
-            <button className="primary-button topbar-action" type="button" onClick={() => setIsAddingClient(true)}>Добавить</button>
+            <button className="text-button" type="button" onClick={() => pushView({ screen: 'settings' })}>Настройки</button>
+            <button className="primary-button topbar-action" type="button"
+              onClick={() => pushView({ screen: 'clients', isAddingClient: true })}>Добавить</button>
           </div>
         )}
       </header>
@@ -104,14 +151,14 @@ function App({ repository = localStorageClientRepository }: AppProps) {
       {error ? null : isLoading ? (
         <p className="loading" role="status">Загружаем клиентов…</p>
       ) : isSettingsOpen ? (
-        <SettingsScreen onBack={showClientList} />
+        <SettingsScreen onBack={() => window.history.back()} />
       ) : selectedClient ? (
-        <ClientScreen client={selectedClient} isAddingPayment={isAddingPayment} onBack={showClientList}
-          onAddPayment={addPayment} onCancelPayment={() => setIsAddingPayment(false)} onUpdateNote={updateNote} />
+        <ClientScreen client={selectedClient} isAddingPayment={isAddingPayment} onBack={() => window.history.back()}
+          onAddPayment={addPayment} onCancelPayment={() => window.history.back()} onUpdateNote={updateNote} />
       ) : (
         <ClientListScreen clients={clients} isAdding={isAddingClient} onAddClient={addClient}
-          onStartAdd={() => setIsAddingClient(true)} onCancelAdd={() => setIsAddingClient(false)}
-          onOpenClient={(clientId) => { setIsAddingClient(false); setSelectedClientId(clientId) }} />
+          onStartAdd={() => pushView({ screen: 'clients', isAddingClient: true })} onCancelAdd={() => window.history.back()}
+          onOpenClient={(clientId) => pushView({ screen: 'client', clientId })} />
       )}
       <ReloadPrompt />
     </main>
