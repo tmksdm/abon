@@ -1,15 +1,48 @@
-import type { Client, NewClient, NewPayment, Payment } from '../domain/client'
-import { addCalendarMonths, isCalendarDate, normalizeRussianPhone, renewClient } from '../domain/client'
+import type { Client, MembershipFreeze, NewClient, NewMembershipFreeze, NewPayment, Payment } from '../domain/client'
+import {
+  addCalendarMonths, calendarDaysBetween, freezeClient, isCalendarDate, normalizeRussianPhone, renewClient, resumeClient,
+} from '../domain/client'
 import type { ClientRepository } from './clientRepository'
 
-const STORAGE_KEY = 'abon.clients.v3'
-const PREVIOUS_STORAGE_KEY = 'abon.clients.v2'
+const STORAGE_KEY = 'abon.clients.v4'
+const PREVIOUS_STORAGE_KEY = 'abon.clients.v3'
+const V2_STORAGE_KEY = 'abon.clients.v2'
 const LEGACY_STORAGE_KEY = 'abon.clients.v1'
 
-type PreviousClient = Omit<Client, 'note'>
+type PreviousClient = Omit<Client, 'freezes'>
+type V2Client = Omit<PreviousClient, 'note'>
 
-type LegacyClient = Omit<PreviousClient, 'payments'> & {
+type LegacyClient = Omit<V2Client, 'payments'> & {
   firstPayment: Omit<Payment, 'id' | 'membershipEndsOn' | 'createdAt'>
+}
+
+function isMembershipFreeze(value: unknown): value is MembershipFreeze {
+  if (!value || typeof value !== 'object') return false
+  const freeze = value as Record<string, unknown>
+  return typeof freeze.id === 'string'
+    && freeze.id.length > 0
+    && (freeze.batchId === null || typeof freeze.batchId === 'string')
+    && typeof freeze.startsOn === 'string'
+    && isCalendarDate(freeze.startsOn)
+    && typeof freeze.plannedResumesOn === 'string'
+    && isCalendarDate(freeze.plannedResumesOn)
+    && freeze.startsOn < freeze.plannedResumesOn
+    && (freeze.resumedOn === null || (typeof freeze.resumedOn === 'string'
+      && isCalendarDate(freeze.resumedOn)
+      && freeze.startsOn <= freeze.resumedOn
+      && freeze.resumedOn <= freeze.plannedResumesOn))
+    && typeof freeze.daysApplied === 'number'
+    && Number.isInteger(freeze.daysApplied)
+    && freeze.daysApplied >= 0
+    && freeze.daysApplied === calendarDaysBetween(
+      freeze.startsOn,
+      typeof freeze.resumedOn === 'string' ? freeze.resumedOn : freeze.plannedResumesOn,
+    )
+    && typeof freeze.createdAt === 'string'
+    && Number.isFinite(Date.parse(freeze.createdAt))
+    && (freeze.resumedAt === null || (typeof freeze.resumedAt === 'string'
+      && Number.isFinite(Date.parse(freeze.resumedAt))))
+    && (freeze.resumedOn === null ? freeze.resumedAt === null : freeze.resumedAt !== null)
 }
 
 function isPayment(value: unknown): value is Payment {
@@ -53,12 +86,14 @@ function isClient(value: unknown): value is Client {
   if (!value || typeof value !== 'object') return false
   const client = value as Record<string, unknown>
   if (!hasValidClientFields(client) || typeof client.note !== 'string'
-    || !Array.isArray(client.payments) || client.payments.length === 0) return false
+    || !Array.isArray(client.payments) || client.payments.length === 0
+    || !Array.isArray(client.freezes)) return false
 
   const payments = client.payments
   return payments.every(isPayment)
     && new Set(payments.map((payment) => payment.id)).size === payments.length
-    && payments[0].membershipEndsOn === client.membershipEndsOn
+    && client.freezes.every(isMembershipFreeze)
+    && new Set(client.freezes.map((freeze) => freeze.id)).size === client.freezes.length
 }
 
 function isLegacyClient(value: unknown): value is LegacyClient {
@@ -98,12 +133,17 @@ function migrateLegacyClient(client: LegacyClient): Client {
       membershipEndsOn: client.membershipEndsOn,
       createdAt: client.createdAt,
     }],
+    freezes: [],
     createdAt: client.createdAt,
   }
 }
 
 function migratePreviousClient(client: PreviousClient): Client {
-  return { ...client, note: '' }
+  return { ...client, freezes: [] }
+}
+
+function migrateV2Client(client: V2Client): Client {
+  return { ...client, note: '', freezes: [] }
 }
 
 function readClients(): Client[] {
@@ -115,8 +155,20 @@ function readClients(): Client[] {
     const clients = (parseClients(previousStored, (value) => {
       if (!value || typeof value !== 'object') return false
       const client = value as Record<string, unknown>
-      return client.note === undefined && isClient({ ...client, note: '' })
+      return client.freezes === undefined && isClient({ ...client, freezes: [] })
     }) as PreviousClient[]).map(migratePreviousClient)
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(clients))
+    return clients
+  }
+
+  const v2Stored = window.localStorage.getItem(V2_STORAGE_KEY)
+  if (v2Stored) {
+    const clients = (parseClients(v2Stored, (value) => {
+      if (!value || typeof value !== 'object') return false
+      const client = value as Record<string, unknown>
+      return client.note === undefined && client.freezes === undefined
+        && isClient({ ...client, note: '', freezes: [] })
+    }) as V2Client[]).map(migrateV2Client)
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(clients))
     return clients
   }
@@ -160,6 +212,7 @@ export const localStorageClientRepository: ClientRepository = {
         membershipEndsOn,
         createdAt,
       }],
+      freezes: [],
       createdAt,
     }
 
@@ -173,6 +226,34 @@ export const localStorageClientRepository: ClientRepository = {
     if (clientIndex < 0) throw new Error('Client not found')
 
     const updatedClient = renewClient(clients[clientIndex], input, new Date().toISOString())
+    if (updatedClient === clients[clientIndex]) return updatedClient
+
+    const updatedClients = [...clients]
+    updatedClients[clientIndex] = updatedClient
+    writeClients(updatedClients)
+    return updatedClient
+  },
+
+  async freeze(clientId: string, input: NewMembershipFreeze) {
+    const clients = readClients()
+    const clientIndex = clients.findIndex((client) => client.id === clientId)
+    if (clientIndex < 0) throw new Error('Client not found')
+
+    const updatedClient = freezeClient(clients[clientIndex], input, new Date().toISOString())
+    if (updatedClient === clients[clientIndex]) return updatedClient
+
+    const updatedClients = [...clients]
+    updatedClients[clientIndex] = updatedClient
+    writeClients(updatedClients)
+    return updatedClient
+  },
+
+  async resume(clientId: string, freezeId: string, resumedOn: string) {
+    const clients = readClients()
+    const clientIndex = clients.findIndex((client) => client.id === clientId)
+    if (clientIndex < 0) throw new Error('Client not found')
+
+    const updatedClient = resumeClient(clients[clientIndex], freezeId, resumedOn, new Date().toISOString())
     if (updatedClient === clients[clientIndex]) return updatedClient
 
     const updatedClients = [...clients]

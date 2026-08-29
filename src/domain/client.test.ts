@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addCalendarMonths, formatDisplayDate, getMembershipStatus, localCalendarDate,
-  normalizeRussianPhone, parseWholeRubles, renewClient,
+  addCalendarMonths, formatDisplayDate, freezeClient, getClientMembershipStatus, getMembershipStatus,
+  localCalendarDate, normalizeRussianPhone, parseWholeRubles, renewClient, resumeClient,
 } from './client'
 
 describe('client domain', () => {
@@ -42,6 +42,7 @@ describe('client domain', () => {
       id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67',
       note: '',
       membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
+      freezes: [],
       payments: [{
         id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
         membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
@@ -52,5 +53,27 @@ describe('client domain', () => {
     expect(renewed.membershipEndsOn).toBe('2026-10-29')
     expect(renewed.payments).toHaveLength(2)
     expect(renewClient(renewed, payment, '2026-09-20T00:00:01.000Z')).toBe(renewed)
+  })
+
+  it('переносит срок на период заморозки и при досрочном завершении оставляет только использованные дни', () => {
+    const client = {
+      id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67', note: '',
+      membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z', freezes: [],
+      payments: [{
+        id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
+        membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
+      }],
+    }
+    const frozen = freezeClient(client, {
+      id: 'freeze-1', startsOn: '2026-09-01', plannedResumesOn: '2026-09-11',
+    }, '2026-09-01T00:00:00.000Z')
+
+    expect(frozen.membershipEndsOn).toBe('2026-10-09')
+    expect(getClientMembershipStatus(frozen, '2026-09-05')).toEqual({ kind: 'frozen', label: 'Заморожен' })
+
+    const resumed = resumeClient(frozen, 'freeze-1', '2026-09-04', '2026-09-04T00:00:00.000Z')
+    expect(resumed.membershipEndsOn).toBe('2026-10-02')
+    expect(resumed.freezes[0]).toMatchObject({ resumedOn: '2026-09-04', daysApplied: 3 })
+    expect(resumeClient(resumed, 'freeze-1', '2026-09-04', '2026-09-04T00:00:01.000Z')).toBe(resumed)
   })
 })

@@ -2,9 +2,12 @@ import { useEffect, useState } from 'react'
 import { APP_VERSIONS, CURRENT_APP_VERSION } from './appVersions'
 import { AddClientForm } from './components/AddClientForm'
 import { AddPaymentForm } from './components/AddPaymentForm'
+import { FreezeMembershipForm } from './components/FreezeMembershipForm'
 import { ReloadPrompt } from './components/ReloadPrompt'
-import type { Client, NewClient, NewPayment } from './domain/client'
-import { formatDisplayDate, getMembershipStatus } from './domain/client'
+import type { Client, MembershipFreeze, NewClient, NewMembershipFreeze, NewPayment } from './domain/client'
+import {
+  formatDisplayDate, getActiveFreeze, getClientMembershipStatus, localCalendarDate,
+} from './domain/client'
 import type { ClientRepository } from './data/clientRepository'
 import { localStorageClientRepository } from './data/localStorageClientRepository'
 
@@ -12,7 +15,7 @@ type AppProps = { repository?: ClientRepository }
 type AppView =
   | { screen: 'clients'; isAddingClient?: boolean }
   | { screen: 'settings' }
-  | { screen: 'client'; clientId: string; isAddingPayment?: boolean }
+  | { screen: 'client'; clientId: string; isAddingPayment?: boolean; isAddingFreeze?: boolean }
 
 const HISTORY_STATE_KEY = 'abonView'
 
@@ -25,6 +28,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [isAddingClient, setIsAddingClient] = useState(false)
   const [isAddingPayment, setIsAddingPayment] = useState(false)
+  const [isAddingFreeze, setIsAddingFreeze] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -34,6 +38,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
     setSelectedClientId(view.screen === 'client' ? view.clientId : null)
     setIsAddingClient(view.screen === 'clients' && view.isAddingClient === true)
     setIsAddingPayment(view.screen === 'client' && view.isAddingPayment === true)
+    setIsAddingFreeze(view.screen === 'client' && view.isAddingFreeze === true)
     setIsSettingsOpen(view.screen === 'settings')
   }
 
@@ -119,6 +124,31 @@ function App({ repository = localStorageClientRepository }: AppProps) {
     }
   }
 
+  const freezeMembership = async (input: NewMembershipFreeze) => {
+    if (!selectedClient) return
+    try {
+      const updatedClient = await repository.freeze(selectedClient.id, input)
+      setClients((current) => current.map((client) => client.id === updatedClient.id ? updatedClient : client))
+      setIsAddingFreeze(false)
+      window.history.replaceState({
+        ...window.history.state,
+        [HISTORY_STATE_KEY]: { screen: 'client', clientId: selectedClient.id },
+      }, '')
+    } catch {
+      throw new Error('Freeze was not saved')
+    }
+  }
+
+  const resumeMembership = async (freezeId: string) => {
+    if (!selectedClient) return
+    try {
+      const updatedClient = await repository.resume(selectedClient.id, freezeId, localCalendarDate())
+      setClients((current) => current.map((client) => client.id === updatedClient.id ? updatedClient : client))
+    } catch {
+      throw new Error('Resume was not saved')
+    }
+  }
+
   const showClientList = () => {
     pushView({ screen: 'clients' })
   }
@@ -154,7 +184,10 @@ function App({ repository = localStorageClientRepository }: AppProps) {
         <SettingsScreen onBack={() => window.history.back()} />
       ) : selectedClient ? (
         <ClientScreen client={selectedClient} isAddingPayment={isAddingPayment} onBack={() => window.history.back()}
-          onAddPayment={addPayment} onCancelPayment={() => window.history.back()} onUpdateNote={updateNote} />
+          isAddingFreeze={isAddingFreeze} onAddPayment={addPayment} onCancelPayment={() => window.history.back()}
+          onStartFreeze={() => pushView({ screen: 'client', clientId: selectedClient.id, isAddingFreeze: true })}
+          onFreeze={freezeMembership} onCancelFreeze={() => window.history.back()} onResume={resumeMembership}
+          onUpdateNote={updateNote} />
       ) : (
         <ClientListScreen clients={clients} isAdding={isAddingClient} onAddClient={addClient}
           onStartAdd={() => pushView({ screen: 'clients', isAddingClient: true })} onCancelAdd={() => window.history.back()}
@@ -210,7 +243,7 @@ function ClientListScreen({ clients, isAdding, onAddClient, onStartAdd, onCancel
     ) : (
       <ul className="client-list" aria-label="Список клиентов">
         {clients.map((client) => {
-          const status = getMembershipStatus(client.membershipEndsOn)
+          const status = getClientMembershipStatus(client)
           return <li key={client.id}>
             <button className="client-card" type="button" onClick={() => onOpenClient(client.id)}>
               <span className="client-card-heading">
@@ -233,15 +266,28 @@ function ClientListScreen({ clients, isAdding, onAddClient, onStartAdd, onCancel
 type ClientScreenProps = {
   client: Client
   isAddingPayment: boolean
+  isAddingFreeze: boolean
   onBack(): void
   onAddPayment(input: NewPayment): Promise<void>
   onCancelPayment(): void
+  onStartFreeze(): void
+  onFreeze(input: NewMembershipFreeze): Promise<void>
+  onCancelFreeze(): void
+  onResume(freezeId: string): Promise<void>
   onUpdateNote(note: string): Promise<void>
 }
 
-function ClientScreen({ client, isAddingPayment, onBack, onAddPayment, onCancelPayment, onUpdateNote }: ClientScreenProps) {
-  const status = getMembershipStatus(client.membershipEndsOn)
-  const payments = [...client.payments].sort((left, right) => right.paidOn.localeCompare(left.paidOn) || right.createdAt.localeCompare(left.createdAt))
+function ClientScreen({
+  client, isAddingPayment, isAddingFreeze, onBack, onAddPayment, onCancelPayment,
+  onStartFreeze, onFreeze, onCancelFreeze, onResume, onUpdateNote,
+}: ClientScreenProps) {
+  const status = getClientMembershipStatus(client)
+  const activeFreeze = getActiveFreeze(client)
+  const upcomingFreeze = client.freezes.find((freeze) => freeze.resumedOn === null && freeze.startsOn > localCalendarDate()) ?? null
+  const operations = [
+    ...client.payments.map((payment) => ({ kind: 'payment' as const, occurredOn: payment.paidOn, createdAt: payment.createdAt, payment })),
+    ...client.freezes.map((freeze) => ({ kind: 'freeze' as const, occurredOn: freeze.startsOn, createdAt: freeze.createdAt, freeze })),
+  ].sort((left, right) => right.occurredOn.localeCompare(left.occurredOn) || right.createdAt.localeCompare(left.createdAt))
   return <>
     <button className="back-button" type="button" onClick={onBack}>К списку</button>
     <section className="page-heading client-page-heading" aria-labelledby="client-title">
@@ -252,19 +298,63 @@ function ClientScreen({ client, isAddingPayment, onBack, onAddPayment, onCancelP
     <section className="membership-summary" aria-label="Текущий абонемент">
       <span>Абонемент до</span><strong>{formatDisplayDate(client.membershipEndsOn)}</strong>
     </section>
+    <FreezeSummary freeze={activeFreeze ?? upcomingFreeze} isActive={activeFreeze !== null}
+      canStart={!isAddingFreeze && status.kind !== 'expired' && activeFreeze === null && upcomingFreeze === null}
+      onStart={onStartFreeze} onResume={onResume} />
+    {isAddingFreeze && <FreezeMembershipForm onSubmit={onFreeze} onCancel={onCancelFreeze} />}
     <ClientNote note={client.note} onSave={onUpdateNote} />
     {isAddingPayment && <AddPaymentForm onSubmit={onAddPayment} onCancel={onCancelPayment} />}
-    <section className="history-section" aria-labelledby="payment-history-title">
-      <div className="section-heading"><div><p className="eyebrow">Все операции</p><h2 id="payment-history-title">История оплат</h2></div>
-        <span className="client-count">{payments.length}</span></div>
-      <ol className="payment-list">
-        {payments.map((payment) => <li key={payment.id}>
-          <div><strong>{moneyFormatter.format(payment.amountRubles)}</strong><span>{payment.durationMonths} мес.</span></div>
-          <time dateTime={payment.paidOn}>{formatDisplayDate(payment.paidOn)}</time>
+    <section className="history-section" aria-labelledby="operation-history-title">
+      <div className="section-heading"><div><p className="eyebrow">Все изменения срока</p><h2 id="operation-history-title">История операций</h2></div>
+        <span className="client-count">{operations.length}</span></div>
+      <ol className="payment-list operation-list">
+        {operations.map((operation) => operation.kind === 'payment' ? <li key={`payment-${operation.payment.id}`}>
+          <div><strong>{moneyFormatter.format(operation.payment.amountRubles)}</strong><span>{operation.payment.durationMonths} мес.</span></div>
+          <time dateTime={operation.payment.paidOn}>{formatDisplayDate(operation.payment.paidOn)}</time>
+        </li> : <li key={`freeze-${operation.freeze.id}`}>
+          <div><strong>Заморозка</strong><span>+{operation.freeze.daysApplied} дн. к сроку</span></div>
+          <span className="operation-date">{formatDisplayDate(operation.freeze.startsOn)} — {formatDisplayDate(operation.freeze.resumedOn ?? operation.freeze.plannedResumesOn)}</span>
         </li>)}
       </ol>
     </section>
   </>
+}
+
+function FreezeSummary({
+  freeze, isActive, canStart, onStart, onResume,
+}: {
+  freeze: MembershipFreeze | null
+  isActive: boolean
+  canStart: boolean
+  onStart(): void
+  onResume(freezeId: string): Promise<void>
+}) {
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const resume = async () => {
+    if (!freeze) return
+    setIsSaving(true)
+    setError(null)
+    try { await onResume(freeze.id) }
+    catch { setError('Не удалось завершить заморозку. Попробуйте ещё раз.') }
+    finally { setIsSaving(false) }
+  }
+
+  return <section className="freeze-card" aria-labelledby="freeze-summary-title">
+    <div className="section-heading">
+      <div><p className="eyebrow">Сохранение дней</p><h2 id="freeze-summary-title">Заморозка</h2></div>
+      {canStart && <button className="text-button" type="button" onClick={onStart}>Заморозить</button>}
+    </div>
+    {freeze ? <>
+      <p className="freeze-period"><strong>{isActive ? 'Заморожен' : 'Запланирована'}</strong>
+        <span>{formatDisplayDate(freeze.startsOn)} — {formatDisplayDate(freeze.plannedResumesOn)}</span></p>
+      <p className="empty-note">К сроку добавлено {freeze.daysApplied} дн.</p>
+      {isActive && <button className="quiet-button resume-button" type="button" disabled={isSaving}
+        onClick={() => void resume()}>{isSaving ? 'Сохраняем…' : 'Разморозить сегодня'}</button>}
+    </> : <p className="empty-note">Абонемент можно поставить на паузу, чтобы дни не сгорели.</p>}
+    {error && <p className="field-error" role="alert">{error}</p>}
+  </section>
 }
 
 function ClientNote({ note, onSave }: { note: string; onSave(note: string): Promise<void> }) {

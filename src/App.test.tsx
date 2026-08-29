@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import App from './App'
 import type { Client } from './domain/client'
 import type { ClientRepository } from './data/clientRepository'
+import { addCalendarDays, localCalendarDate } from './domain/client'
 
 const client: Client = {
   id: 'client-1',
@@ -10,6 +11,7 @@ const client: Client = {
   phone: '+7 900 123-45-67',
   note: '',
   membershipEndsOn: '2026-09-29',
+  freezes: [],
   payments: [{
     id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
     membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
@@ -26,6 +28,12 @@ function createRepository(): ClientRepository {
       membershipEndsOn: '2026-10-29',
       payments: [{ ...input, membershipEndsOn: '2026-10-29', createdAt: '2026-09-20T00:00:00.000Z' }, ...client.payments],
     })),
+    freeze: vi.fn().mockImplementation(async (_clientId, input) => ({
+      ...client,
+      membershipEndsOn: addCalendarDays(client.membershipEndsOn, 7),
+      freezes: [{ ...input, batchId: null, resumedOn: null, daysApplied: 7, createdAt: new Date().toISOString(), resumedAt: null }],
+    })),
+    resume: vi.fn().mockResolvedValue(client),
     updateNote: vi.fn().mockImplementation(async (_clientId, note) => ({ ...client, note: note.trim() })),
   }
 }
@@ -62,7 +70,7 @@ describe('App', () => {
     render(<App repository={repository} />)
 
     fireEvent.click(await screen.findByRole('button', { name: /Анна/ }))
-    expect(screen.getByRole('heading', { name: 'История оплат' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'История операций' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Новая оплата' }))
     fireEvent.change(screen.getByLabelText('Сумма, ₽'), { target: { value: '3500' } })
     fireEvent.change(screen.getByLabelText('Дата оплаты'), { target: { value: '2026-09-20' } })
@@ -72,6 +80,25 @@ describe('App', () => {
     expect(await screen.findByText('29 октября 2026')).toBeInTheDocument()
     expect(screen.getByText('3 500 ₽')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
+  })
+
+  it('замораживает абонемент, показывает отдельный статус и записывает операцию в историю', async () => {
+    const repository = createRepository()
+    vi.mocked(repository.list).mockResolvedValue([client])
+    render(<App repository={repository} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Анна/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Заморозить' }))
+    const resumesOn = addCalendarDays(localCalendarDate(), 7)
+    fireEvent.change(screen.getByLabelText('Возобновить с'), { target: { value: resumesOn } })
+    fireEvent.click(screen.getByRole('button', { name: 'Заморозить' }))
+
+    await waitFor(() => expect(repository.freeze).toHaveBeenCalledWith('client-1', expect.objectContaining({
+      startsOn: localCalendarDate(), plannedResumesOn: resumesOn,
+    })))
+    expect(await screen.findByText('Заморожен', { selector: '.status-badge' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Разморозить сегодня' })).toBeInTheDocument()
+    expect(screen.getByText('+7 дн. к сроку')).toBeInTheDocument()
   })
 
   it('сохраняет заметку в карточке и показывает её одной строкой в списке', async () => {
@@ -105,7 +132,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
 
     expect(screen.getByRole('heading', { name: 'Настройки' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260829.8')
+    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260829.9')
     expect(screen.getByRole('heading', { name: 'История версий' })).toBeInTheDocument()
     expect(screen.getByText('Добавлены история версий в настройках и полный формат дат.')).toBeInTheDocument()
   })

@@ -18,6 +18,20 @@ export type Payment = NewPayment & {
   createdAt: string
 }
 
+export type NewMembershipFreeze = {
+  id: string
+  startsOn: string
+  plannedResumesOn: string
+  batchId?: string | null
+}
+
+export type MembershipFreeze = NewMembershipFreeze & {
+  resumedOn: string | null
+  daysApplied: number
+  createdAt: string
+  resumedAt: string | null
+}
+
 export type Client = {
   id: string
   name: string
@@ -25,11 +39,12 @@ export type Client = {
   note: string
   membershipEndsOn: string
   payments: Payment[]
+  freezes: MembershipFreeze[]
   createdAt: string
 }
 
 export type MembershipStatus = {
-  kind: 'active' | 'due-soon' | 'expired'
+  kind: 'active' | 'due-soon' | 'expired' | 'frozen'
   label: string
 }
 
@@ -67,6 +82,18 @@ export function addCalendarMonths(date: string, months: number) {
   return new Date(Date.UTC(targetYear, targetMonth, Math.min(parsed.day, lastDay)))
     .toISOString()
     .slice(0, 10)
+}
+
+export function addCalendarDays(date: string, days: number) {
+  if (!Number.isInteger(days)) throw new Error('Invalid duration')
+  const parsed = parseCalendarDate(date)
+  return new Date(parsed.time + days * 86_400_000).toISOString().slice(0, 10)
+}
+
+export function calendarDaysBetween(startsOn: string, resumesOn: string) {
+  const days = (parseCalendarDate(resumesOn).time - parseCalendarDate(startsOn).time) / 86_400_000
+  if (!Number.isInteger(days) || days < 0) throw new Error('Invalid date range')
+  return days
 }
 
 export function parseWholeRubles(value: string) {
@@ -132,6 +159,18 @@ export function getMembershipStatus(
   return { kind: 'active', label: 'Активен' }
 }
 
+export function getActiveFreeze(client: Client, today = localCalendarDate()) {
+  return client.freezes.find((freeze) => {
+    const resumesOn = freeze.resumedOn ?? freeze.plannedResumesOn
+    return freeze.startsOn <= today && today < resumesOn
+  }) ?? null
+}
+
+export function getClientMembershipStatus(client: Client, today = localCalendarDate()): MembershipStatus {
+  if (getActiveFreeze(client, today)) return { kind: 'frozen', label: 'Заморожен' }
+  return getMembershipStatus(client.membershipEndsOn, today)
+}
+
 export function renewClient(client: Client, input: NewPayment, createdAt: string): Client {
   if (!input.id
     || !Number.isSafeInteger(input.amountRubles)
@@ -155,5 +194,53 @@ export function renewClient(client: Client, input: NewPayment, createdAt: string
     ...client,
     membershipEndsOn,
     payments: [payment, ...client.payments],
+  }
+}
+
+export function freezeClient(client: Client, input: NewMembershipFreeze, createdAt: string): Client {
+  if (!input.id || !isCalendarDate(input.startsOn) || !isCalendarDate(input.plannedResumesOn)
+    || !Number.isFinite(Date.parse(createdAt))) {
+    throw new Error('Invalid freeze')
+  }
+  if (client.freezes.some((freeze) => freeze.id === input.id)) return client
+
+  const daysApplied = calendarDaysBetween(input.startsOn, input.plannedResumesOn)
+  if (daysApplied < 1 || getMembershipStatus(client.membershipEndsOn, input.startsOn).kind === 'expired') {
+    throw new Error('Invalid freeze')
+  }
+
+  const overlapsExisting = client.freezes.some((freeze) => {
+    const existingResumesOn = freeze.resumedOn ?? freeze.plannedResumesOn
+    return input.startsOn < existingResumesOn && freeze.startsOn < input.plannedResumesOn
+  })
+  if (overlapsExisting) throw new Error('Overlapping freeze')
+
+  return {
+    ...client,
+    membershipEndsOn: addCalendarDays(client.membershipEndsOn, daysApplied),
+    freezes: [{ ...input, batchId: input.batchId ?? null, resumedOn: null, daysApplied, createdAt, resumedAt: null }, ...client.freezes],
+  }
+}
+
+export function resumeClient(client: Client, freezeId: string, resumedOn: string, resumedAt: string): Client {
+  if (!freezeId || !isCalendarDate(resumedOn) || !Number.isFinite(Date.parse(resumedAt))) {
+    throw new Error('Invalid resume')
+  }
+
+  const freezeIndex = client.freezes.findIndex((freeze) => freeze.id === freezeId)
+  if (freezeIndex < 0) throw new Error('Freeze not found')
+  const freeze = client.freezes[freezeIndex]
+  if (freeze.resumedOn !== null) return client
+  if (resumedOn < freeze.startsOn || resumedOn > freeze.plannedResumesOn) throw new Error('Invalid resume')
+
+  const actualDays = calendarDaysBetween(freeze.startsOn, resumedOn)
+  const unusedDays = freeze.daysApplied - actualDays
+  const freezes = [...client.freezes]
+  freezes[freezeIndex] = { ...freeze, resumedOn, daysApplied: actualDays, resumedAt }
+
+  return {
+    ...client,
+    membershipEndsOn: addCalendarDays(client.membershipEndsOn, -unusedDays),
+    freezes,
   }
 }
