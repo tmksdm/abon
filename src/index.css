@@ -521,6 +521,29 @@ h2 {
   box-shadow: var(--shadow-card);
 }
 
+.batch-freeze-card {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 1.15rem;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.batch-freeze-card .section-heading { margin-bottom: 0.65rem; }
+.batch-freeze-note { margin-top: 0.65rem; }
+
+.batch-preview {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.9rem;
+  border-radius: 0.85rem;
+  color: var(--color-text);
+  background: var(--color-accent-soft);
+}
+
+.batch-preview span { color: var(--color-muted); font-size: 0.82rem; }
+
 .freeze-card .section-heading { margin-bottom: 0.65rem; }
 .freeze-period { display: grid; gap: 0.25rem; }
 .freeze-period span { color: var(--color-muted); font-size: 0.86rem; }

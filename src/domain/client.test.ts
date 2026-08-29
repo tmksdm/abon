@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addCalendarMonths, formatDisplayDate, freezeClient, getClientMembershipStatus, getMembershipStatus,
-  localCalendarDate, normalizeRussianPhone, parseWholeRubles, renewClient, resumeClient,
+  localCalendarDate, normalizeRussianPhone, parseWholeRubles, previewFreezeBatch, renewClient, resumeClient,
 } from './client'
 
 describe('client domain', () => {
@@ -75,5 +75,58 @@ describe('client domain', () => {
     expect(resumed.membershipEndsOn).toBe('2026-10-02')
     expect(resumed.freezes[0]).toMatchObject({ resumedOn: '2026-09-04', daysApplied: 3 })
     expect(resumeClient(resumed, 'freeze-1', '2026-09-04', '2026-09-04T00:00:01.000Z')).toBe(resumed)
+  })
+
+  it('добавляет общей заморозкой только непокрытые дни и согласованно завершает её досрочно', () => {
+    const client = {
+      id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67', note: '',
+      membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z', freezes: [],
+      payments: [{
+        id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
+        membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
+      }],
+    }
+    const personal = freezeClient(client, {
+      id: 'personal', startsOn: '2026-09-01', plannedResumesOn: '2026-09-11',
+    }, '2026-09-01T00:00:00.000Z')
+    const batch = freezeClient(personal, {
+      id: 'batch-1:client-1', batchId: 'batch-1', startsOn: '2026-09-05', plannedResumesOn: '2026-09-15',
+    }, '2026-09-02T00:00:00.000Z')
+
+    expect(batch.membershipEndsOn).toBe('2026-10-13')
+    expect(batch.freezes.find((freeze) => freeze.batchId === 'batch-1')?.daysApplied).toBe(4)
+    expect(previewFreezeBatch([personal], {
+      id: 'preview', startsOn: '2026-09-05', plannedResumesOn: '2026-09-15',
+    })).toEqual({ affectedClients: 1, totalDaysApplied: 4 })
+
+    const resumed = resumeClient(batch, 'batch-1:client-1', '2026-09-08', '2026-09-08T00:00:00.000Z')
+    expect(resumed.membershipEndsOn).toBe('2026-10-09')
+    expect(resumed.freezes.find((freeze) => freeze.batchId === 'batch-1')).toMatchObject({
+      resumedOn: '2026-09-08', daysApplied: 0,
+    })
+  })
+
+  it('сохраняет общую заморозку без продления, если период покрыт, и подхватывает дни при раннем завершении личной', () => {
+    const client = {
+      id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67', note: '',
+      membershipEndsOn: '2026-10-09', createdAt: '2026-08-29T00:00:00.000Z',
+      payments: [{
+        id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
+        membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
+      }],
+      freezes: [{
+        id: 'personal', batchId: null, startsOn: '2026-09-01', plannedResumesOn: '2026-09-11',
+        resumedOn: null, daysApplied: 10, createdAt: '2026-09-01T00:00:00.000Z', resumedAt: null,
+      }],
+    }
+    const batch = freezeClient(client, {
+      id: 'batch-1:client-1', batchId: 'batch-1', startsOn: '2026-09-03', plannedResumesOn: '2026-09-08',
+    }, '2026-09-02T00:00:00.000Z')
+    expect(batch.membershipEndsOn).toBe('2026-10-09')
+    expect(batch.freezes.find((freeze) => freeze.batchId === 'batch-1')?.daysApplied).toBe(0)
+
+    const resumedPersonal = resumeClient(batch, 'personal', '2026-09-04', '2026-09-04T00:00:00.000Z')
+    expect(resumedPersonal.membershipEndsOn).toBe('2026-10-06')
+    expect(resumedPersonal.freezes.find((freeze) => freeze.batchId === 'batch-1')?.daysApplied).toBe(4)
   })
 })

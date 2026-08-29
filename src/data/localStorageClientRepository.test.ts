@@ -23,7 +23,7 @@ describe('localStorageClientRepository', () => {
     await expect(localStorageClientRepository.list()).rejects.toThrow('Invalid stored clients')
   })
 
-  it('отклоняет заморозку с числом дней, которое не совпадает с периодом', async () => {
+  it('отклоняет заморозку с числом дней больше периода', async () => {
     window.localStorage.setItem('abon.clients.v4', JSON.stringify([{
       id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67', note: '', membershipEndsOn: '2026-10-09',
       payments: [{
@@ -37,6 +37,25 @@ describe('localStorageClientRepository', () => {
       createdAt: '2026-08-29T00:00:00.000Z',
     }]))
 
+    await expect(localStorageClientRepository.list()).rejects.toThrow('Invalid stored clients')
+  })
+
+  it('отклоняет двойной учёт дней в пересекающихся заморозках', async () => {
+    window.localStorage.setItem('abon.clients.v4', JSON.stringify([{
+      id: 'client-1', name: 'Анна', phone: '+7 900 123-45-67', note: '', membershipEndsOn: '2026-10-13',
+      payments: [{
+        id: 'payment-1', amountRubles: 3000, paidOn: '2026-08-29', durationMonths: 1,
+        membershipEndsOn: '2026-09-29', createdAt: '2026-08-29T00:00:00.000Z',
+      }],
+      freezes: [{
+        id: 'personal', batchId: null, startsOn: '2026-09-01', plannedResumesOn: '2026-09-11',
+        resumedOn: null, daysApplied: 10, createdAt: '2026-09-01T00:00:00.000Z', resumedAt: null,
+      }, {
+        id: 'batch:client-1', batchId: 'batch', startsOn: '2026-09-05', plannedResumesOn: '2026-09-15',
+        resumedOn: null, daysApplied: 10, createdAt: '2026-09-02T00:00:00.000Z', resumedAt: null,
+      }],
+      createdAt: '2026-08-29T00:00:00.000Z',
+    }]))
     await expect(localStorageClientRepository.list()).rejects.toThrow('Invalid stored clients')
   })
 
@@ -128,5 +147,39 @@ describe('localStorageClientRepository', () => {
       membershipEndsOn: '2026-10-02',
       freezes: [{ id: 'freeze-1', batchId: null, resumedOn: '2026-09-04', daysApplied: 3 }],
     }])
+  })
+
+  it('атомарно применяет и досрочно завершает общую заморозку', async () => {
+    const first = await localStorageClientRepository.add({
+      name: 'Анна', phone: '9001234567', amountRubles: 3000,
+      paidOn: '2026-08-29', durationMonths: 1,
+    })
+    const second = await localStorageClientRepository.add({
+      name: 'Ирина', phone: '9007654321', amountRubles: 3000,
+      paidOn: '2026-08-29', durationMonths: 1,
+    })
+    await localStorageClientRepository.freeze(first.id, {
+      id: 'personal', startsOn: '2026-09-01', plannedResumesOn: '2026-09-11',
+    })
+    const input = { id: 'batch-1', startsOn: '2026-09-05', plannedResumesOn: '2026-09-15' }
+    await localStorageClientRepository.freezeBatch(input)
+    await localStorageClientRepository.freezeBatch(input)
+
+    await expect(localStorageClientRepository.list()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: first.id, membershipEndsOn: '2026-10-13',
+        freezes: expect.arrayContaining([expect.objectContaining({ batchId: 'batch-1', daysApplied: 4 })]),
+      }),
+      expect.objectContaining({
+        id: second.id, membershipEndsOn: '2026-10-09',
+        freezes: [expect.objectContaining({ batchId: 'batch-1', daysApplied: 10 })],
+      }),
+    ]))
+
+    await localStorageClientRepository.resumeBatch('batch-1', '2026-09-08')
+    await expect(localStorageClientRepository.list()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: first.id, membershipEndsOn: '2026-10-09' }),
+      expect.objectContaining({ id: second.id, membershipEndsOn: '2026-10-02' }),
+    ]))
   })
 })

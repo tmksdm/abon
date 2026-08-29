@@ -1,6 +1,9 @@
-import type { Client, MembershipFreeze, NewClient, NewMembershipFreeze, NewPayment, Payment } from '../domain/client'
+import type {
+  Client, MembershipFreeze, NewClient, NewMembershipFreeze, NewMembershipFreezeBatch, NewPayment, Payment,
+} from '../domain/client'
 import {
-  addCalendarMonths, calendarDaysBetween, freezeClient, isCalendarDate, normalizeRussianPhone, renewClient, resumeClient,
+  addCalendarMonths, calendarDaysBetween, countCoveredFreezeDays, freezeClient, isCalendarDate, normalizeRussianPhone,
+  previewFreezeBatch, renewClient, resumeClient,
 } from '../domain/client'
 import type { ClientRepository } from './clientRepository'
 
@@ -21,7 +24,7 @@ function isMembershipFreeze(value: unknown): value is MembershipFreeze {
   const freeze = value as Record<string, unknown>
   return typeof freeze.id === 'string'
     && freeze.id.length > 0
-    && (freeze.batchId === null || typeof freeze.batchId === 'string')
+    && (freeze.batchId === null || (typeof freeze.batchId === 'string' && freeze.batchId.length > 0))
     && typeof freeze.startsOn === 'string'
     && isCalendarDate(freeze.startsOn)
     && typeof freeze.plannedResumesOn === 'string'
@@ -34,9 +37,8 @@ function isMembershipFreeze(value: unknown): value is MembershipFreeze {
     && typeof freeze.daysApplied === 'number'
     && Number.isInteger(freeze.daysApplied)
     && freeze.daysApplied >= 0
-    && freeze.daysApplied === calendarDaysBetween(
-      freeze.startsOn,
-      typeof freeze.resumedOn === 'string' ? freeze.resumedOn : freeze.plannedResumesOn,
+    && freeze.daysApplied <= calendarDaysBetween(
+      freeze.startsOn, typeof freeze.resumedOn === 'string' ? freeze.resumedOn : freeze.plannedResumesOn,
     )
     && typeof freeze.createdAt === 'string'
     && Number.isFinite(Date.parse(freeze.createdAt))
@@ -90,10 +92,12 @@ function isClient(value: unknown): value is Client {
     || !Array.isArray(client.freezes)) return false
 
   const payments = client.payments
+  const freezes = client.freezes as MembershipFreeze[]
   return payments.every(isPayment)
     && new Set(payments.map((payment) => payment.id)).size === payments.length
-    && client.freezes.every(isMembershipFreeze)
-    && new Set(client.freezes.map((freeze) => freeze.id)).size === client.freezes.length
+    && freezes.every(isMembershipFreeze)
+    && new Set(freezes.map((freeze) => freeze.id)).size === freezes.length
+    && freezes.reduce((sum, freeze) => sum + freeze.daysApplied, 0) === countCoveredFreezeDays(freezes)
 }
 
 function isLegacyClient(value: unknown): value is LegacyClient {
@@ -260,6 +264,37 @@ export const localStorageClientRepository: ClientRepository = {
     updatedClients[clientIndex] = updatedClient
     writeClients(updatedClients)
     return updatedClient
+  },
+
+  async freezeBatch(input: NewMembershipFreezeBatch) {
+    if (!input.id) throw new Error('Invalid freeze batch')
+    const clients = readClients()
+    previewFreezeBatch(clients, input)
+    const createdAt = new Date().toISOString()
+    const updatedClients = clients.map((client) => {
+      try {
+        return freezeClient(client, {
+          id: `${input.id}:${client.id}`, batchId: input.id,
+          startsOn: input.startsOn, plannedResumesOn: input.plannedResumesOn,
+        }, createdAt)
+      } catch {
+        return client
+      }
+    })
+    if (updatedClients.some((client, index) => client !== clients[index])) writeClients(updatedClients)
+    return updatedClients
+  },
+
+  async resumeBatch(batchId: string, resumedOn: string) {
+    if (!batchId) throw new Error('Invalid freeze batch')
+    const clients = readClients()
+    const resumedAt = new Date().toISOString()
+    const updatedClients = clients.map((client) => {
+      const freeze = client.freezes.find((item) => item.batchId === batchId && item.resumedOn === null)
+      return freeze ? resumeClient(client, freeze.id, resumedOn, resumedAt) : client
+    })
+    if (updatedClients.some((client, index) => client !== clients[index])) writeClients(updatedClients)
+    return updatedClients
   },
 
   async updateNote(clientId: string, note: string) {

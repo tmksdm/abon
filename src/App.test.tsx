@@ -34,6 +34,8 @@ function createRepository(): ClientRepository {
       freezes: [{ ...input, batchId: null, resumedOn: null, daysApplied: 7, createdAt: new Date().toISOString(), resumedAt: null }],
     })),
     resume: vi.fn().mockResolvedValue(client),
+    freezeBatch: vi.fn().mockResolvedValue([client]),
+    resumeBatch: vi.fn().mockResolvedValue([client]),
     updateNote: vi.fn().mockImplementation(async (_clientId, note) => ({ ...client, note: note.trim() })),
   }
 }
@@ -101,6 +103,33 @@ describe('App', () => {
     expect(screen.getByText('+7 дн. к сроку')).toBeInTheDocument()
   })
 
+  it('показывает предварительный расчёт и сохраняет общую заморозку одной операцией', async () => {
+    const repository = createRepository()
+    const secondClient = { ...client, id: 'client-2', name: 'Ирина', phone: '+7 900 765-43-21' }
+    vi.mocked(repository.list).mockResolvedValue([client, secondClient])
+    vi.mocked(repository.freezeBatch).mockImplementation(async (input) => [client, secondClient].map((item) => ({
+      ...item,
+      membershipEndsOn: addCalendarDays(item.membershipEndsOn, 7),
+      freezes: [{
+        id: `${input.id}:${item.id}`, batchId: input.id, startsOn: input.startsOn,
+        plannedResumesOn: input.plannedResumesOn, resumedOn: null, daysApplied: 7,
+        createdAt: new Date().toISOString(), resumedAt: null,
+      }],
+    })))
+    render(<App repository={repository} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Настроить' }))
+    expect(screen.getByText('Будут затронуты: 2')).toBeInTheDocument()
+    expect(screen.getByText('Всего будет добавлено 14 клиент-дн.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Применить общую заморозку' }))
+
+    await waitFor(() => expect(repository.freezeBatch).toHaveBeenCalledWith(expect.objectContaining({
+      startsOn: localCalendarDate(), plannedResumesOn: addCalendarDays(localCalendarDate(), 7),
+    })))
+    expect(await screen.findByText('Затронуто клиентов: 2. Добавлено 14 клиент-дн.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Завершить сегодня' })).toBeInTheDocument()
+  })
+
   it('сохраняет заметку в карточке и показывает её одной строкой в списке', async () => {
     const repository = createRepository()
     vi.mocked(repository.list).mockResolvedValue([client])
@@ -132,7 +161,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
 
     expect(screen.getByRole('heading', { name: 'Настройки' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260829.9')
+    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260829.10')
     expect(screen.getByRole('heading', { name: 'История версий' })).toBeInTheDocument()
     expect(screen.getByText('Добавлены история версий в настройках и полный формат дат.')).toBeInTheDocument()
   })

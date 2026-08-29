@@ -2,9 +2,12 @@ import { useEffect, useState } from 'react'
 import { APP_VERSIONS, CURRENT_APP_VERSION } from './appVersions'
 import { AddClientForm } from './components/AddClientForm'
 import { AddPaymentForm } from './components/AddPaymentForm'
+import { BatchFreezeForm } from './components/BatchFreezeForm'
 import { FreezeMembershipForm } from './components/FreezeMembershipForm'
 import { ReloadPrompt } from './components/ReloadPrompt'
-import type { Client, MembershipFreeze, NewClient, NewMembershipFreeze, NewPayment } from './domain/client'
+import type {
+  Client, MembershipFreeze, NewClient, NewMembershipFreeze, NewMembershipFreezeBatch, NewPayment,
+} from './domain/client'
 import {
   formatDisplayDate, getActiveFreeze, getClientMembershipStatus, localCalendarDate,
 } from './domain/client'
@@ -13,7 +16,7 @@ import { localStorageClientRepository } from './data/localStorageClientRepositor
 
 type AppProps = { repository?: ClientRepository }
 type AppView =
-  | { screen: 'clients'; isAddingClient?: boolean }
+  | { screen: 'clients'; isAddingClient?: boolean; isAddingBatchFreeze?: boolean }
   | { screen: 'settings' }
   | { screen: 'client'; clientId: string; isAddingPayment?: boolean; isAddingFreeze?: boolean }
 
@@ -27,6 +30,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const [clients, setClients] = useState<Client[]>([])
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [isAddingClient, setIsAddingClient] = useState(false)
+  const [isAddingBatchFreeze, setIsAddingBatchFreeze] = useState(false)
   const [isAddingPayment, setIsAddingPayment] = useState(false)
   const [isAddingFreeze, setIsAddingFreeze] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
@@ -37,6 +41,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const applyView = (view: AppView) => {
     setSelectedClientId(view.screen === 'client' ? view.clientId : null)
     setIsAddingClient(view.screen === 'clients' && view.isAddingClient === true)
+    setIsAddingBatchFreeze(view.screen === 'clients' && view.isAddingBatchFreeze === true)
     setIsAddingPayment(view.screen === 'client' && view.isAddingPayment === true)
     setIsAddingFreeze(view.screen === 'client' && view.isAddingFreeze === true)
     setIsSettingsOpen(view.screen === 'settings')
@@ -149,6 +154,23 @@ function App({ repository = localStorageClientRepository }: AppProps) {
     }
   }
 
+  const freezeBatch = async (input: NewMembershipFreezeBatch) => {
+    try {
+      setClients(await repository.freezeBatch(input))
+      setIsAddingBatchFreeze(false)
+      window.history.replaceState({
+        ...window.history.state, [HISTORY_STATE_KEY]: { screen: 'clients' },
+      }, '')
+    } catch {
+      throw new Error('Freeze batch was not saved')
+    }
+  }
+
+  const resumeBatch = async (batchId: string) => {
+    try { setClients(await repository.resumeBatch(batchId, localCalendarDate())) }
+    catch { throw new Error('Freeze batch was not resumed') }
+  }
+
   const showClientList = () => {
     pushView({ screen: 'clients' })
   }
@@ -189,8 +211,11 @@ function App({ repository = localStorageClientRepository }: AppProps) {
           onFreeze={freezeMembership} onCancelFreeze={() => window.history.back()} onResume={resumeMembership}
           onUpdateNote={updateNote} />
       ) : (
-        <ClientListScreen clients={clients} isAdding={isAddingClient} onAddClient={addClient}
+        <ClientListScreen clients={clients} isAdding={isAddingClient} isAddingBatchFreeze={isAddingBatchFreeze}
+          onAddClient={addClient} onFreezeBatch={freezeBatch} onResumeBatch={resumeBatch}
           onStartAdd={() => pushView({ screen: 'clients', isAddingClient: true })} onCancelAdd={() => window.history.back()}
+          onStartBatchFreeze={() => pushView({ screen: 'clients', isAddingBatchFreeze: true })}
+          onCancelBatchFreeze={() => window.history.back()}
           onOpenClient={(clientId) => pushView({ screen: 'client', clientId })} />
       )}
       <ReloadPrompt />
@@ -221,18 +246,30 @@ function SettingsScreen({ onBack }: { onBack(): void }) {
 type ClientListScreenProps = {
   clients: Client[]
   isAdding: boolean
+  isAddingBatchFreeze: boolean
   onAddClient(input: NewClient): Promise<void>
   onStartAdd(): void
   onCancelAdd(): void
+  onFreezeBatch(input: NewMembershipFreezeBatch): Promise<void>
+  onStartBatchFreeze(): void
+  onCancelBatchFreeze(): void
+  onResumeBatch(batchId: string): Promise<void>
   onOpenClient(clientId: string): void
 }
 
-function ClientListScreen({ clients, isAdding, onAddClient, onStartAdd, onCancelAdd, onOpenClient }: ClientListScreenProps) {
+function ClientListScreen({
+  clients, isAdding, isAddingBatchFreeze, onAddClient, onStartAdd, onCancelAdd,
+  onFreezeBatch, onStartBatchFreeze, onCancelBatchFreeze, onResumeBatch, onOpenClient,
+}: ClientListScreenProps) {
+  const activeBatch = findCurrentFreezeBatch(clients)
   return <>
     <section className="page-heading" aria-labelledby="clients-title">
       <div><p className="eyebrow">Учёт абонементов</p><h1 id="clients-title">Клиенты</h1></div>
       <span className="client-count">{clients.length}</span>
     </section>
+    {clients.length > 0 && <BatchFreezeSummary batch={activeBatch} isAdding={isAddingBatchFreeze}
+      onStart={onStartBatchFreeze} onResume={onResumeBatch} />}
+    {isAddingBatchFreeze && <BatchFreezeForm clients={clients} onSubmit={onFreezeBatch} onCancel={onCancelBatchFreeze} />}
     {isAdding && <AddClientForm onSubmit={onAddClient} onCancel={onCancelAdd} />}
     {clients.length === 0 && !isAdding ? (
       <section className="empty-state">
@@ -261,6 +298,68 @@ function ClientListScreen({ clients, isAdding, onAddClient, onStartAdd, onCancel
       </ul>
     )}
   </>
+}
+
+type FreezeBatchSummary = {
+  id: string
+  startsOn: string
+  plannedResumesOn: string
+  affectedClients: number
+  totalDaysApplied: number
+  isActive: boolean
+}
+
+function findCurrentFreezeBatch(clients: Client[]): FreezeBatchSummary | null {
+  const today = localCalendarDate()
+  const batches = new Map<string, MembershipFreeze[]>()
+  for (const client of clients) {
+    for (const freeze of client.freezes) {
+      if (freeze.batchId && freeze.resumedOn === null) {
+        batches.set(freeze.batchId, [...(batches.get(freeze.batchId) ?? []), freeze])
+      }
+    }
+  }
+  const candidates = [...batches.entries()].map(([id, freezes]) => ({
+    id, startsOn: freezes[0].startsOn, plannedResumesOn: freezes[0].plannedResumesOn,
+    affectedClients: freezes.length,
+    totalDaysApplied: freezes.reduce((sum, freeze) => sum + freeze.daysApplied, 0),
+    isActive: freezes[0].startsOn <= today && today < freezes[0].plannedResumesOn,
+  })).filter((batch) => today < batch.plannedResumesOn)
+  return candidates.sort((left, right) => left.startsOn.localeCompare(right.startsOn))[0] ?? null
+}
+
+function BatchFreezeSummary({
+  batch, isAdding, onStart, onResume,
+}: {
+  batch: FreezeBatchSummary | null
+  isAdding: boolean
+  onStart(): void
+  onResume(batchId: string): Promise<void>
+}) {
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const resume = async () => {
+    if (!batch) return
+    setIsSaving(true)
+    setError(null)
+    try { await onResume(batch.id) }
+    catch { setError('Не удалось завершить общую заморозку. Попробуйте ещё раз.') }
+    finally { setIsSaving(false) }
+  }
+  return <section className="batch-freeze-card" aria-labelledby="batch-freeze-summary-title">
+    <div className="section-heading">
+      <div><p className="eyebrow">Пауза для зала</p><h2 id="batch-freeze-summary-title">Общая заморозка</h2></div>
+      {!isAdding && !batch && <button className="text-button" type="button" onClick={onStart}>Настроить</button>}
+    </div>
+    {batch ? <>
+      <p className="freeze-period"><strong>{batch.isActive ? 'Действует сейчас' : 'Запланирована'}</strong>
+        <span>{formatDisplayDate(batch.startsOn)} — {formatDisplayDate(batch.plannedResumesOn)}</span></p>
+      <p className="empty-note">Затронуто клиентов: {batch.affectedClients}. Добавлено {batch.totalDaysApplied} клиент-дн.</p>
+      {batch.isActive && <button className="quiet-button resume-button" type="button" disabled={isSaving}
+        onClick={() => void resume()}>{isSaving ? 'Сохраняем…' : 'Завершить сегодня'}</button>}
+    </> : <p className="empty-note">При болезни или отпуске можно одной операцией сохранить дни всем активным клиентам.</p>}
+    {error && <p className="field-error" role="alert">{error}</p>}
+  </section>
 }
 
 type ClientScreenProps = {
@@ -312,7 +411,7 @@ function ClientScreen({
           <div><strong>{moneyFormatter.format(operation.payment.amountRubles)}</strong><span>{operation.payment.durationMonths} мес.</span></div>
           <time dateTime={operation.payment.paidOn}>{formatDisplayDate(operation.payment.paidOn)}</time>
         </li> : <li key={`freeze-${operation.freeze.id}`}>
-          <div><strong>Заморозка</strong><span>+{operation.freeze.daysApplied} дн. к сроку</span></div>
+          <div><strong>{operation.freeze.batchId ? 'Общая заморозка' : 'Заморозка'}</strong><span>+{operation.freeze.daysApplied} дн. к сроку</span></div>
           <span className="operation-date">{formatDisplayDate(operation.freeze.startsOn)} — {formatDisplayDate(operation.freeze.resumedOn ?? operation.freeze.plannedResumesOn)}</span>
         </li>)}
       </ol>
@@ -350,8 +449,9 @@ function FreezeSummary({
       <p className="freeze-period"><strong>{isActive ? 'Заморожен' : 'Запланирована'}</strong>
         <span>{formatDisplayDate(freeze.startsOn)} — {formatDisplayDate(freeze.plannedResumesOn)}</span></p>
       <p className="empty-note">К сроку добавлено {freeze.daysApplied} дн.</p>
-      {isActive && <button className="quiet-button resume-button" type="button" disabled={isSaving}
+      {isActive && freeze.batchId === null && <button className="quiet-button resume-button" type="button" disabled={isSaving}
         onClick={() => void resume()}>{isSaving ? 'Сохраняем…' : 'Разморозить сегодня'}</button>}
+      {freeze.batchId && <p className="empty-note batch-freeze-note">Общая заморозка управляется из списка клиентов.</p>}
     </> : <p className="empty-note">Абонемент можно поставить на паузу, чтобы дни не сгорели.</p>}
     {error && <p className="field-error" role="alert">{error}</p>}
   </section>
