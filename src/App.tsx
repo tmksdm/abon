@@ -7,6 +7,7 @@ import { EditClientForm } from './components/EditClientForm'
 import { FreezeMembershipForm } from './components/FreezeMembershipForm'
 import { Icon } from './components/Icon'
 import { ReloadPrompt } from './components/ReloadPrompt'
+import { TariffForm } from './components/TariffForm'
 import type {
   Client, ClientListFilter, MembershipFreeze, NewClient, NewMembershipFreeze, NewMembershipFreezeBatch, NewPayment,
   UpdateClient,
@@ -18,8 +19,12 @@ import {
 import type { ClientRepository } from './data/clientRepository'
 import { createDemoClientRepository } from './data/demoClientRepository'
 import { localStorageClientRepository } from './data/localStorageClientRepository'
+import { createMemoryTariffRepository } from './data/memoryTariffRepository'
+import { localStorageTariffRepository } from './data/localStorageTariffRepository'
+import type { TariffRepository } from './data/tariffRepository'
+import type { NewTariff, Tariff } from './domain/tariff'
 
-type AppProps = { repository?: ClientRepository }
+type AppProps = { repository?: ClientRepository; tariffRepository?: TariffRepository }
 type AppView =
   | { screen: 'clients'; isAddingClient?: boolean }
   | { screen: 'settings'; isAddingBatchFreeze?: boolean }
@@ -33,10 +38,12 @@ const moneyFormatter = new Intl.NumberFormat('ru-RU', {
   style: 'currency', currency: 'RUB', maximumFractionDigits: 0,
 })
 
-function App({ repository = localStorageClientRepository }: AppProps) {
+function App({ repository = localStorageClientRepository, tariffRepository = localStorageTariffRepository }: AppProps) {
   const [activeRepository, setActiveRepository] = useState<ClientRepository>(repository)
+  const [activeTariffRepository, setActiveTariffRepository] = useState<TariffRepository>(tariffRepository)
   const [isDemoMode, setIsDemoMode] = useState(false)
   const [clients, setClients] = useState<Client[]>([])
+  const [tariffs, setTariffs] = useState<Tariff[]>([])
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [isAddingClient, setIsAddingClient] = useState(false)
   const [isAddingBatchFreeze, setIsAddingBatchFreeze] = useState(false)
@@ -49,6 +56,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
   const [isArchiveOpen, setIsArchiveOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [tariffError, setTariffError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [clientFilter, setClientFilter] = useState<ClientListFilter>('all')
   const activeClients = clients.filter((client) => client.archivedAt === null)
@@ -89,6 +97,22 @@ function App({ repository = localStorageClientRepository }: AppProps) {
       .finally(() => { if (isCurrent) setIsLoading(false) })
     return () => { isCurrent = false }
   }, [activeRepository])
+
+  const retryTariffs = async () => {
+    setTariffError(null)
+    try { setTariffs(await activeTariffRepository.list()) }
+    catch { setTariffError('Не удалось открыть тарифы на этом устройстве.') }
+  }
+
+  useEffect(() => {
+    let isCurrent = true
+    activeTariffRepository.list()
+      .then((storedTariffs) => {
+        if (isCurrent) { setTariffs(storedTariffs); setTariffError(null) }
+      })
+      .catch(() => { if (isCurrent) setTariffError('Не удалось открыть тарифы на этом устройстве.') })
+    return () => { isCurrent = false }
+  }, [activeTariffRepository])
 
   useEffect(() => {
     const rootView: AppView = { screen: 'clients' }
@@ -248,11 +272,27 @@ function App({ repository = localStorageClientRepository }: AppProps) {
     catch { throw new Error('Freeze batch was not resumed') }
   }
 
+  const addTariff = async (input: NewTariff) => {
+    const tariff = await activeTariffRepository.add(input)
+    setTariffs((current) => [...current, tariff])
+  }
+
+  const updateTariff = async (tariffId: string, input: NewTariff) => {
+    const updated = await activeTariffRepository.update(tariffId, input)
+    setTariffs((current) => current.map((tariff) => tariff.id === tariffId ? updated : tariff))
+  }
+
+  const deleteTariff = async (tariffId: string) => {
+    await activeTariffRepository.delete(tariffId)
+    setTariffs((current) => current.filter((tariff) => tariff.id !== tariffId))
+  }
+
   const enterDemoMode = () => {
     setError(null)
     setIsLoading(true)
     setIsDemoMode(true)
     setActiveRepository(createDemoClientRepository())
+    setActiveTariffRepository(createDemoTariffRepository())
     pushView({ screen: 'clients' })
   }
 
@@ -261,6 +301,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
     setIsLoading(true)
     setIsDemoMode(false)
     setActiveRepository(repository)
+    setActiveTariffRepository(tariffRepository)
     pushView({ screen: 'clients' })
   }
 
@@ -285,8 +326,11 @@ function App({ repository = localStorageClientRepository }: AppProps) {
       {error ? null : isLoading ? (
         <p className="loading" role="status">Загружаем клиентов…</p>
       ) : isSettingsOpen ? (
-        <SettingsScreen clients={activeClients} archivedCount={archivedClients.length} isDemoMode={isDemoMode} isAddingBatchFreeze={isAddingBatchFreeze}
+        <SettingsScreen clients={activeClients} tariffs={tariffs} tariffError={tariffError}
+          archivedCount={archivedClients.length} isDemoMode={isDemoMode} isAddingBatchFreeze={isAddingBatchFreeze}
           onEnableDemo={enterDemoMode} onExitDemo={exitDemoMode} onFreezeBatch={freezeBatch} onResumeBatch={resumeBatch}
+          onAddTariff={addTariff} onUpdateTariff={updateTariff} onDeleteTariff={deleteTariff}
+          onRetryTariffs={() => void retryTariffs()}
           onOpenArchive={() => pushView({ screen: 'archive' })}
           onStartBatchFreeze={() => pushView({ screen: 'settings', isAddingBatchFreeze: true })}
           onCancelBatchFreeze={() => window.history.back()}
@@ -295,7 +339,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
         <ArchiveScreen clients={archivedClients} isDemoMode={isDemoMode} onBack={() => window.history.back()}
           onOpenClient={(clientId) => pushView({ screen: 'client', clientId })} />
       ) : selectedClient ? (
-        <ClientScreen client={selectedClient} isDemoMode={isDemoMode} isAddingPayment={isAddingPayment} onBack={() => window.history.back()}
+        <ClientScreen client={selectedClient} tariffs={tariffs} isDemoMode={isDemoMode} isAddingPayment={isAddingPayment} onBack={() => window.history.back()}
           isAddingFreeze={isAddingFreeze} onAddPayment={addPayment} onCancelPayment={() => window.history.back()}
           onStartFreeze={() => pushView({ screen: 'client', clientId: selectedClient.id, isAddingFreeze: true })}
           onFreeze={freezeMembership} onCancelFreeze={() => window.history.back()} onResume={resumeMembership}
@@ -308,7 +352,7 @@ function App({ repository = localStorageClientRepository }: AppProps) {
           onStartDelete={() => pushView({ screen: 'client', clientId: selectedClient.id, isConfirmingDelete: true })}
           onCancelDelete={() => window.history.back()} onDeletePermanently={deleteClientPermanently} />
       ) : (
-        <ClientListScreen clients={activeClients} query={searchQuery} filter={clientFilter}
+        <ClientListScreen clients={activeClients} tariffs={tariffs} query={searchQuery} filter={clientFilter}
           isAdding={isAddingClient}
           onQueryChange={setSearchQuery} onFilterChange={setClientFilter}
           onAddClient={addClient}
@@ -328,10 +372,13 @@ function App({ repository = localStorageClientRepository }: AppProps) {
 }
 
 function SettingsScreen({
-  clients, archivedCount, isDemoMode, isAddingBatchFreeze, onEnableDemo, onExitDemo, onFreezeBatch,
-  onStartBatchFreeze, onCancelBatchFreeze, onResumeBatch, onOpenArchive, onBack,
+  clients, tariffs, tariffError, archivedCount, isDemoMode, isAddingBatchFreeze, onEnableDemo, onExitDemo, onFreezeBatch,
+  onStartBatchFreeze, onCancelBatchFreeze, onResumeBatch, onAddTariff, onUpdateTariff, onDeleteTariff,
+  onRetryTariffs, onOpenArchive, onBack,
 }: {
   clients: Client[]
+  tariffs: Tariff[]
+  tariffError: string | null
   archivedCount: number
   isDemoMode: boolean
   isAddingBatchFreeze: boolean
@@ -341,6 +388,10 @@ function SettingsScreen({
   onStartBatchFreeze(): void
   onCancelBatchFreeze(): void
   onResumeBatch(batchId: string): Promise<void>
+  onAddTariff(input: NewTariff): Promise<void>
+  onUpdateTariff(tariffId: string, input: NewTariff): Promise<void>
+  onDeleteTariff(tariffId: string): Promise<void>
+  onRetryTariffs(): void
   onOpenArchive(): void
   onBack(): void
 }) {
@@ -360,6 +411,8 @@ function SettingsScreen({
         {isDemoMode ? 'Выйти и очистить demo-данные' : 'Включить demo-режим'}
       </button>
     </section>
+    <TariffManager tariffs={tariffs} error={tariffError} onAdd={onAddTariff}
+      onUpdate={onUpdateTariff} onDelete={onDeleteTariff} onRetry={onRetryTariffs} />
     <section className="settings-card" aria-labelledby="batch-freeze-settings-title">
       <div><p className="eyebrow">Редкая операция</p><h2 id="batch-freeze-settings-title">Общая заморозка</h2></div>
       <p>Поставьте действующие абонементы на паузу на время болезни или отпуска тренера.</p>
@@ -384,6 +437,75 @@ function SettingsScreen({
       </ol>
     </section>
   </>
+}
+
+function createDemoTariffRepository() {
+  const timestamp = '2026-08-30T00:00:00.000Z'
+  return createMemoryTariffRepository([
+    { id: 'demo-tariff-month', name: 'Месяц', amountRubles: 3000, durationMonths: 1, createdAt: timestamp, updatedAt: timestamp },
+    { id: 'demo-tariff-quarter', name: 'Три месяца', amountRubles: 8000, durationMonths: 3, createdAt: timestamp, updatedAt: timestamp },
+    { id: 'demo-tariff-year', name: 'Год', amountRubles: 28000, durationMonths: 12, createdAt: timestamp, updatedAt: timestamp },
+  ])
+}
+
+function TariffManager({ tariffs, error, onAdd, onUpdate, onDelete, onRetry }: {
+  tariffs: Tariff[]
+  error: string | null
+  onAdd(input: NewTariff): Promise<void>
+  onUpdate(tariffId: string, input: NewTariff): Promise<void>
+  onDelete(tariffId: string): Promise<void>
+  onRetry(): void
+}) {
+  const [isAdding, setIsAdding] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const editingTariff = tariffs.find((tariff) => tariff.id === editingId)
+
+  const add = async (input: NewTariff) => {
+    await onAdd(input)
+    setIsAdding(false)
+  }
+  const update = async (input: NewTariff) => {
+    if (!editingId) return
+    await onUpdate(editingId, input)
+    setEditingId(null)
+  }
+  const remove = async (tariffId: string) => {
+    setActionError(null)
+    try {
+      await onDelete(tariffId)
+      setDeletingId(null)
+    } catch {
+      setActionError('Не удалось удалить тариф. Попробуйте ещё раз.')
+    }
+  }
+
+  return <section className="settings-card" aria-labelledby="tariffs-settings-title">
+    <div><p className="eyebrow">Быстрое заполнение</p><h2 id="tariffs-settings-title">Тарифы</h2></div>
+    <p>Выбор тарифа подставляет сумму и срок. Сохранённые оплаты от шаблона не зависят.</p>
+    {error ? <div className="field-error" role="alert">{error} <button className="text-button" type="button"
+      onClick={onRetry}>Повторить</button></div> : <>
+      {tariffs.length > 0 && <ol className="version-list" aria-label="Список тарифов">
+        {tariffs.map((tariff) => <li key={tariff.id}>
+          <strong>{tariff.name}</strong><p>{moneyFormatter.format(tariff.amountRubles)} · {membershipLabel(tariff.durationMonths)}</p>
+          {deletingId === tariff.id ? <div className="confirmation-panel" role="alertdialog" aria-label={`Удалить тариф ${tariff.name}`}>
+            <p>Удалить шаблон? Уже сохранённые оплаты останутся без изменений.</p>
+            <div className="form-actions"><button className="quiet-button" type="button" onClick={() => setDeletingId(null)}>Отмена</button>
+              <button className="danger-button" type="button" onClick={() => void remove(tariff.id)}>Удалить</button></div>
+          </div> : <div className="form-actions">
+            <button className="text-button" type="button" onClick={() => { setIsAdding(false); setEditingId(tariff.id) }}>Изменить</button>
+            <button className="danger-text-button" type="button" onClick={() => setDeletingId(tariff.id)}>Удалить</button>
+          </div>}
+        </li>)}
+      </ol>}
+      {actionError && <p className="field-error" role="alert">{actionError}</p>}
+      {!isAdding && editingId === null && <button className="quiet-button" type="button" onClick={() => setIsAdding(true)}>
+        Добавить тариф</button>}
+      {isAdding && <TariffForm onSubmit={add} onCancel={() => setIsAdding(false)} />}
+      {editingTariff && <TariffForm tariff={editingTariff} onSubmit={update} onCancel={() => setEditingId(null)} />}
+    </>}
+  </section>
 }
 
 function ArchiveScreen({
@@ -425,6 +547,7 @@ function ArchiveScreen({
 
 type ClientListScreenProps = {
   clients: Client[]
+  tariffs: Tariff[]
   query: string
   filter: ClientListFilter
   isAdding: boolean
@@ -437,7 +560,7 @@ type ClientListScreenProps = {
 }
 
 function ClientListScreen({
-  clients, query, filter, isAdding, onAddClient, onStartAdd, onCancelAdd, onOpenClient,
+  clients, tariffs, query, filter, isAdding, onAddClient, onStartAdd, onCancelAdd, onOpenClient,
   onQueryChange, onFilterChange,
 }: ClientListScreenProps) {
   const attention = getClientAttentionSummary(clients)
@@ -462,7 +585,7 @@ function ClientListScreen({
           <option value="active">Активные</option><option value="frozen">Заморожены</option>
         </select></label>
     </div>}
-    {isAdding && <AddClientForm onSubmit={onAddClient} onCancel={onCancelAdd} />}
+    {isAdding && <AddClientForm tariffs={tariffs} onSubmit={onAddClient} onCancel={onCancelAdd} />}
     {clients.length === 0 && !isAdding ? (
       <section className="empty-state">
         <span className="empty-mark" aria-hidden="true">A</span><h2>Пока нет клиентов</h2>
@@ -568,6 +691,7 @@ function BatchFreezeSummary({
 
 type ClientScreenProps = {
   client: Client
+  tariffs: Tariff[]
   isDemoMode: boolean
   isAddingPayment: boolean
   isAddingFreeze: boolean
@@ -595,7 +719,7 @@ type ClientScreenProps = {
 }
 
 function ClientScreen({
-  client, isDemoMode, isAddingPayment, isAddingFreeze, onBack, onAddPayment, onCancelPayment,
+  client, tariffs, isDemoMode, isAddingPayment, isAddingFreeze, onBack, onAddPayment, onCancelPayment,
   onStartFreeze, onFreeze, onCancelFreeze, onResume, onUpdateNote,
   isEditingClient, onStartEdit, onUpdateClient, onCancelEdit, isConfirmingArchive,
   onStartArchive, onCancelArchive, onArchive, onRestore, isConfirmingDelete,
@@ -662,7 +786,7 @@ function ClientScreen({
     {isArchived && client.note && <section className="note-card" aria-labelledby="archived-client-note-title">
       <div className="section-heading"><h2 id="archived-client-note-title">Заметка</h2></div><p className="client-note">{client.note}</p>
     </section>}
-    {isAddingPayment && !isArchived && <AddPaymentForm onSubmit={onAddPayment} onCancel={onCancelPayment} />}
+    {isAddingPayment && !isArchived && <AddPaymentForm tariffs={tariffs} onSubmit={onAddPayment} onCancel={onCancelPayment} />}
     <section className="history-section" aria-labelledby="operation-history-title">
       <div className="section-heading"><div><p className="eyebrow">Все изменения срока</p><h2 id="operation-history-title">История операций</h2></div>
         <span className="client-count">{operations.length}</span></div>

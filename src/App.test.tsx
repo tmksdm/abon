@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest'
 import App from './App'
 import type { Client } from './domain/client'
 import type { ClientRepository } from './data/clientRepository'
+import type { TariffRepository } from './data/tariffRepository'
 import { addCalendarDays, localCalendarDate } from './domain/client'
+import type { Tariff } from './domain/tariff'
 
 const client: Client = {
   id: 'client-1',
@@ -45,6 +47,24 @@ function createRepository(): ClientRepository {
   }
 }
 
+const tariff: Tariff = {
+  id: 'tariff-1', name: 'Стандарт', amountRubles: 3200, durationMonths: 2,
+  createdAt: '2026-08-30T00:00:00.000Z', updatedAt: '2026-08-30T00:00:00.000Z',
+}
+
+function createTariffRepository(initial: Tariff[] = []): TariffRepository {
+  return {
+    list: vi.fn().mockResolvedValue(initial),
+    add: vi.fn().mockImplementation(async (input) => ({
+      ...input, id: 'tariff-added', createdAt: '2026-08-30T00:00:00.000Z', updatedAt: '2026-08-30T00:00:00.000Z',
+    })),
+    update: vi.fn().mockImplementation(async (id, input) => ({
+      ...input, id, createdAt: '2026-08-30T00:00:00.000Z', updatedAt: '2026-08-30T01:00:00.000Z',
+    })),
+    delete: vi.fn().mockResolvedValue(undefined),
+  }
+}
+
 describe('App', () => {
   it('объясняет пустое состояние', async () => {
     render(<App repository={createRepository()} />)
@@ -71,6 +91,17 @@ describe('App', () => {
       .toHaveTextContent(/29\.08\.2026·3 000 ₽·до 29\.09\.2026·Месяц/)
   })
 
+  it('подставляет сумму и срок тарифа при добавлении клиента', async () => {
+    const repository = createRepository()
+    render(<App repository={repository} tariffRepository={createTariffRepository([tariff])} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Добавить клиента' }))
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Тариф' }), { target: { value: tariff.id } })
+
+    expect(screen.getByLabelText('Сумма, ₽')).toHaveValue(3200)
+    expect(screen.getByLabelText('Срок абонемента')).toHaveValue('2')
+  })
+
   it('открывает клиента и продлевает абонемент новой оплатой', async () => {
     const repository = createRepository()
     vi.mocked(repository.list).mockResolvedValue([client])
@@ -87,6 +118,50 @@ describe('App', () => {
     expect(await screen.findByText('29 октября 2026')).toBeInTheDocument()
     expect(screen.getByText('3 500 ₽')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
+  })
+
+  it('подставляет тариф в новую оплату и сохраняет его значения снимком', async () => {
+    const repository = createRepository()
+    vi.mocked(repository.list).mockResolvedValue([client])
+    render(<App repository={repository} tariffRepository={createTariffRepository([tariff])} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Анна/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Новая оплата' }))
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Тариф' }), { target: { value: tariff.id } })
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить оплату' }))
+
+    await waitFor(() => expect(repository.addPayment).toHaveBeenCalledWith('client-1', expect.objectContaining({
+      amountRubles: 3200, durationMonths: 2,
+    })))
+  })
+
+  it('создаёт, изменяет и удаляет тариф в настройках', async () => {
+    const tariffRepository = createTariffRepository()
+    render(<App repository={createRepository()} tariffRepository={tariffRepository} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Добавить тариф' }))
+    fireEvent.change(screen.getByLabelText('Название'), { target: { value: 'Утро' } })
+    fireEvent.change(screen.getByLabelText('Сумма, ₽'), { target: { value: '2500' } })
+    fireEvent.change(screen.getByLabelText('Срок, месяцев'), { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить тариф' }))
+    await waitFor(() => expect(tariffRepository.add).toHaveBeenCalledWith({
+      name: 'Утро', amountRubles: 2500, durationMonths: 1,
+    }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Изменить' }))
+    fireEvent.change(screen.getByLabelText('Название'), { target: { value: 'Утро плюс' } })
+    fireEvent.change(screen.getByLabelText('Сумма, ₽'), { target: { value: '2700' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить тариф' }))
+    await waitFor(() => expect(tariffRepository.update).toHaveBeenCalledWith('tariff-added', {
+      name: 'Утро плюс', amountRubles: 2700, durationMonths: 1,
+    }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Удалить' }))
+    expect(screen.getByText(/Уже сохранённые оплаты останутся без изменений/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить' }))
+    await waitFor(() => expect(tariffRepository.delete).toHaveBeenCalledWith('tariff-added'))
+    expect(screen.queryByText('Утро плюс')).not.toBeInTheDocument()
   })
 
   it('замораживает абонемент, показывает отдельный статус и записывает операцию в историю', async () => {
@@ -257,7 +332,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
 
     expect(screen.getByRole('heading', { name: 'Настройки' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260830.3')
+    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260830.4')
     expect(screen.getByRole('heading', { name: 'История версий' })).toBeInTheDocument()
     expect(screen.getByText('Добавлены история версий в настройках и полный формат дат.')).toBeInTheDocument()
   })

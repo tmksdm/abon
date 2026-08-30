@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import type { NewClient } from '../domain/client'
 import { normalizeRussianPhone, parseWholeRubles } from '../domain/client'
+import type { Tariff } from '../domain/tariff'
 
 type AddClientFormProps = {
   onSubmit(input: NewClient): Promise<void>
   onCancel(): void
+  tariffs: Tariff[]
 }
 
 function today() {
@@ -12,9 +14,26 @@ function today() {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
 }
 
-export function AddClientForm({ onSubmit, onCancel }: AddClientFormProps) {
+export function AddClientForm({ onSubmit, onCancel, tariffs }: AddClientFormProps) {
   const [isSaving, setIsSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [selectedTariffId, setSelectedTariffId] = useState('')
+  const [amount, setAmount] = useState('')
+  const [durationMonths, setDurationMonths] = useState('1')
+  const durationOptions = [...new Set([1, 3, 6, 12, Number(durationMonths)])]
+    .filter((months) => Number.isInteger(months) && months > 0)
+
+  const selectTariff = (tariffId: string) => {
+    setSelectedTariffId(tariffId)
+    const tariff = tariffs.find((item) => item.id === tariffId)
+    if (tariff) {
+      setAmount(String(tariff.amountRubles))
+      setDurationMonths(String(tariff.durationMonths))
+    } else {
+      setAmount('')
+      setDurationMonths('1')
+    }
+  }
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -62,10 +81,16 @@ export function AddClientForm({ onSubmit, onCancel }: AddClientFormProps) {
             placeholder="+7 900 000-00-00"
           />
         </label>
+        {tariffs.length > 0 && <label><span>Тариф</span>
+          <select aria-label="Тариф" value={selectedTariffId} onChange={(event) => selectTariff(event.target.value)}>
+            <option value="">Заполнить вручную</option>
+            {tariffs.map((tariff) => <option key={tariff.id} value={tariff.id}>{tariff.name}</option>)}
+          </select></label>}
         <div className="form-row">
           <label>
             <span>Сумма, ₽</span>
-            <input name="amount" type="number" min="1" step="1" inputMode="numeric" required placeholder="3000" />
+            <input name="amount" type="number" min="1" step="1" inputMode="numeric" required placeholder="3000"
+              value={amount} onChange={(event) => { setAmount(event.target.value); setSelectedTariffId('') }} />
           </label>
           <label>
             <span>Дата оплаты</span>
@@ -74,11 +99,11 @@ export function AddClientForm({ onSubmit, onCancel }: AddClientFormProps) {
         </div>
         <label>
           <span>Срок абонемента</span>
-          <select name="durationMonths" defaultValue="1">
-            <option value="1">1 месяц</option>
-            <option value="3">3 месяца</option>
-            <option value="6">6 месяцев</option>
-            <option value="12">12 месяцев</option>
+          <select name="durationMonths" value={durationMonths}
+            onChange={(event) => { setDurationMonths(event.target.value); setSelectedTariffId('') }}>
+            {durationOptions.map((months) => <option key={months} value={months}>
+              {months === 1 ? '1 месяц' : `${months} мес.`}
+            </option>)}
           </select>
         </label>
         {formError && <p className="field-error" role="alert">{formError}</p>}
