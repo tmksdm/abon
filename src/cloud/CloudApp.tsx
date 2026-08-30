@@ -133,13 +133,16 @@ export function CloudApp() {
         queueKey: `abon.sync.queue.v1:${user.uid}:${gymId}`,
       })
       const unsubscribeState = nextController.subscribeState(setSyncState)
+      setController(nextController)
       try {
         await nextController.start()
-        if (active) setController(nextController)
       } catch {
         unsubscribeState()
         nextController.stop()
-        if (active) setStartupError(true)
+        if (active) {
+          setController(null)
+          setStartupError(true)
+        }
       }
     }).catch(() => { if (active) setStartupError(true) })
     return () => { active = false; nextController?.stop() }
