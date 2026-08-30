@@ -3,6 +3,7 @@ import { APP_VERSIONS, CURRENT_APP_VERSION } from './appVersions'
 import { AddClientForm } from './components/AddClientForm'
 import { AddPaymentForm } from './components/AddPaymentForm'
 import { BatchFreezeForm } from './components/BatchFreezeForm'
+import { BackupManager } from './components/BackupManager'
 import { EditClientForm } from './components/EditClientForm'
 import { FreezeMembershipForm } from './components/FreezeMembershipForm'
 import { Icon } from './components/Icon'
@@ -23,6 +24,7 @@ import { createMemoryTariffRepository } from './data/memoryTariffRepository'
 import { localStorageTariffRepository } from './data/localStorageTariffRepository'
 import type { TariffRepository } from './data/tariffRepository'
 import type { NewTariff, Tariff } from './domain/tariff'
+import type { BackupPreview } from './backup'
 
 type AppProps = { repository?: ClientRepository; tariffRepository?: TariffRepository }
 type AppView =
@@ -287,6 +289,21 @@ function App({ repository = localStorageClientRepository, tariffRepository = loc
     setTariffs((current) => current.filter((tariff) => tariff.id !== tariffId))
   }
 
+  const restoreBackup = async (backup: BackupPreview) => {
+    const previousClients = await activeRepository.list()
+    const previousTariffs = await activeTariffRepository.list()
+    try {
+      await activeRepository.replaceAll(backup.clients)
+      await activeTariffRepository.replaceAll(backup.tariffs)
+      setClients(backup.clients)
+      setTariffs(backup.tariffs)
+    } catch {
+      await activeRepository.replaceAll(previousClients)
+      await activeTariffRepository.replaceAll(previousTariffs)
+      throw new Error('Backup was not restored')
+    }
+  }
+
   const enterDemoMode = () => {
     setError(null)
     setIsLoading(true)
@@ -330,6 +347,7 @@ function App({ repository = localStorageClientRepository, tariffRepository = loc
           archivedCount={archivedClients.length} isDemoMode={isDemoMode} isAddingBatchFreeze={isAddingBatchFreeze}
           onEnableDemo={enterDemoMode} onExitDemo={exitDemoMode} onFreezeBatch={freezeBatch} onResumeBatch={resumeBatch}
           onAddTariff={addTariff} onUpdateTariff={updateTariff} onDeleteTariff={deleteTariff}
+          onRestoreBackup={restoreBackup}
           onRetryTariffs={() => void retryTariffs()}
           onOpenArchive={() => pushView({ screen: 'archive' })}
           onStartBatchFreeze={() => pushView({ screen: 'settings', isAddingBatchFreeze: true })}
@@ -375,6 +393,7 @@ function SettingsScreen({
   clients, tariffs, tariffError, archivedCount, isDemoMode, isAddingBatchFreeze, onEnableDemo, onExitDemo, onFreezeBatch,
   onStartBatchFreeze, onCancelBatchFreeze, onResumeBatch, onAddTariff, onUpdateTariff, onDeleteTariff,
   onRetryTariffs, onOpenArchive, onBack,
+  onRestoreBackup,
 }: {
   clients: Client[]
   tariffs: Tariff[]
@@ -391,6 +410,7 @@ function SettingsScreen({
   onAddTariff(input: NewTariff): Promise<void>
   onUpdateTariff(tariffId: string, input: NewTariff): Promise<void>
   onDeleteTariff(tariffId: string): Promise<void>
+  onRestoreBackup(backup: BackupPreview): Promise<void>
   onRetryTariffs(): void
   onOpenArchive(): void
   onBack(): void
@@ -413,6 +433,7 @@ function SettingsScreen({
     </section>
     <TariffManager tariffs={tariffs} error={tariffError} onAdd={onAddTariff}
       onUpdate={onUpdateTariff} onDelete={onDeleteTariff} onRetry={onRetryTariffs} />
+    <BackupManager clients={clients} tariffs={tariffs} disabled={isDemoMode} onRestore={onRestoreBackup} />
     <section className="settings-card" aria-labelledby="batch-freeze-settings-title">
       <div><p className="eyebrow">Редкая операция</p><h2 id="batch-freeze-settings-title">Общая заморозка</h2></div>
       <p>Поставьте действующие абонементы на паузу на время болезни или отпуска тренера.</p>

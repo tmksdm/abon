@@ -736,6 +736,27 @@ h2 {
   line-height: 1.4;
 }
 
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.backup-status {
+  font-size: 0.8rem !important;
+}
+
+.backup-preview {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.8rem;
+  border: 1px solid var(--color-danger);
+  border-radius: 0.85rem;
+  background: var(--color-danger-soft);
+}
+
+.backup-preview p { margin: 0; }
+
 .archive-search { margin-bottom: 0.55rem; }
 .compact-empty-state { min-height: 10rem; }
 

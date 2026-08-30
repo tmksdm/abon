@@ -4,6 +4,7 @@ import type {
 
 export interface ClientRepository {
   list(): Promise<Client[]>
+  replaceAll(clients: Client[]): Promise<void>
   add(input: NewClient): Promise<Client>
   update(clientId: string, input: UpdateClient): Promise<Client>
   archive(clientId: string): Promise<Client>

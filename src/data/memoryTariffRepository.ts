@@ -14,6 +14,7 @@ export function createMemoryTariffRepository(initialTariffs: Tariff[] = []): Tar
   let tariffs = initialTariffs.map((tariff) => ({ ...tariff }))
   return {
     async list() { return tariffs.map((tariff) => ({ ...tariff })) },
+    async replaceAll(replacement) { tariffs = replacement.map((tariff) => ({ ...tariff })) },
     async add(input) {
       const normalized = normalizeTariff(input)
       ensureUniqueName(tariffs, normalized)

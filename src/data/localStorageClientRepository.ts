@@ -88,7 +88,7 @@ function hasValidClientFields(client: Record<string, unknown>) {
   }
 }
 
-function isClient(value: unknown): value is Client {
+export function isClient(value: unknown): value is Client {
   if (!value || typeof value !== 'object') return false
   const client = value as Record<string, unknown>
   if (!hasValidClientFields(client) || typeof client.note !== 'string'
@@ -219,6 +219,13 @@ function ensureActive(client: Client) {
 export const localStorageClientRepository: ClientRepository = {
   async list() {
     return readClients().sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+  },
+
+  async replaceAll(clients) {
+    if (!clients.every(isClient) || new Set(clients.map((client) => client.id)).size !== clients.length) {
+      throw new Error('Invalid clients')
+    }
+    writeClients(clients)
   },
 
   async add(input: NewClient) {

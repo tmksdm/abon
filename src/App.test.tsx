@@ -25,6 +25,7 @@ const client: Client = {
 function createRepository(): ClientRepository {
   return {
     list: vi.fn().mockResolvedValue([]),
+    replaceAll: vi.fn().mockResolvedValue(undefined),
     add: vi.fn().mockResolvedValue(client),
     update: vi.fn().mockImplementation(async (_clientId, input) => ({ ...client, ...input })),
     archive: vi.fn().mockResolvedValue({ ...client, archivedAt: '2026-08-30T00:00:00.000Z' }),
@@ -55,6 +56,7 @@ const tariff: Tariff = {
 function createTariffRepository(initial: Tariff[] = []): TariffRepository {
   return {
     list: vi.fn().mockResolvedValue(initial),
+    replaceAll: vi.fn().mockResolvedValue(undefined),
     add: vi.fn().mockImplementation(async (input) => ({
       ...input, id: 'tariff-added', createdAt: '2026-08-30T00:00:00.000Z', updatedAt: '2026-08-30T00:00:00.000Z',
     })),
@@ -332,9 +334,29 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
 
     expect(screen.getByRole('heading', { name: 'Настройки' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260830.4')
+    expect(screen.getByLabelText('Текущая версия')).toHaveTextContent('260830.5')
     expect(screen.getByRole('heading', { name: 'История версий' })).toBeInTheDocument()
     expect(screen.getByText('Добавлены история версий в настройках и полный формат дат.')).toBeInTheDocument()
+  })
+
+  it('проверяет копию до записи и заменяет базу только после подтверждения', async () => {
+    const repository = createRepository()
+    const tariffRepository = createTariffRepository()
+    const content = JSON.stringify({
+      app: 'abon', version: 1, createdAt: '2026-08-30T02:00:00.000Z',
+      data: { clients: [client], tariffs: [tariff] },
+    })
+    render(<App repository={repository} tariffRepository={tariffRepository} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Настройки' }))
+
+    const input = screen.getByLabelText('Выбрать файл резервной копии')
+    fireEvent.change(input, { target: { files: [new File([content], 'abon.json', { type: 'application/json' })] } })
+
+    expect(await screen.findByText('Файл проверен')).toBeInTheDocument()
+    expect(repository.replaceAll).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить замену базы' }))
+    await waitFor(() => expect(repository.replaceAll).toHaveBeenCalledWith([client]))
+    expect(tariffRepository.replaceAll).toHaveBeenCalledWith([tariff])
   })
 
   it('изолирует demo-изменения и явно очищает их при выходе', async () => {

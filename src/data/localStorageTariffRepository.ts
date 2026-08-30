@@ -22,6 +22,12 @@ function writeTariffs(tariffs: Tariff[]) {
 
 export const localStorageTariffRepository: TariffRepository = {
   async list() { return readTariffs() },
+  async replaceAll(tariffs) {
+    if (!tariffs.every(isTariff) || new Set(tariffs.map((tariff) => tariff.id)).size !== tariffs.length) {
+      throw new Error('Invalid tariffs')
+    }
+    writeTariffs(tariffs)
+  },
   async add(input) {
     const repository = createMemoryTariffRepository(readTariffs())
     const tariff = await repository.add(input)

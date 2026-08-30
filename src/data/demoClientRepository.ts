@@ -105,6 +105,14 @@ export function createDemoClientRepository(today = localCalendarDate()): ClientR
       return [...clients]
     },
 
+    async replaceAll(replacement) {
+      clients = replacement.map((client) => ({
+        ...client,
+        payments: client.payments.map((payment) => ({ ...payment })),
+        freezes: client.freezes.map((freeze) => ({ ...freeze })),
+      }))
+    },
+
     async add(input: NewClient) {
       const name = input.name.trim()
       if (!name || !Number.isSafeInteger(input.amountRubles) || input.amountRubles <= 0) {
