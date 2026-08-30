@@ -32,7 +32,15 @@ service cloud.firestore {
         && request.resource.data.memberUids == resource.data.memberUids;
       allow delete: if false;
 
-      match /{document=**} {
+      match /clients/{clientId} {
+        allow read, write: if isGymMember(gymId);
+      }
+
+      match /tariffs/{tariffId} {
+        allow read, write: if isGymMember(gymId);
+      }
+
+      match /operations/{operationId} {
         allow read, write: if isGymMember(gymId);
       }
     }
