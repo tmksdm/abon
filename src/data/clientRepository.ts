@@ -3,6 +3,7 @@ import type {
 } from '../domain/client'
 
 export interface ClientRepository {
+  subscribe?(listener: () => void): () => void
   list(): Promise<Client[]>
   replaceAll(clients: Client[]): Promise<void>
   add(input: NewClient): Promise<Client>

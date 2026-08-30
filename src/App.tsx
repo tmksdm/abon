@@ -25,8 +25,16 @@ import { localStorageTariffRepository } from './data/localStorageTariffRepositor
 import type { TariffRepository } from './data/tariffRepository'
 import type { NewTariff, Tariff } from './domain/tariff'
 import type { BackupPreview } from './backup'
+import type { SyncState } from './sync/sync'
 
-type AppProps = { repository?: ClientRepository; tariffRepository?: TariffRepository }
+export type AccountInfo = {
+  email: string
+  syncState: SyncState
+  onSync(): Promise<void>
+  onSignOut(): Promise<void>
+}
+
+type AppProps = { repository?: ClientRepository; tariffRepository?: TariffRepository; account?: AccountInfo }
 type AppView =
   | { screen: 'clients'; isAddingClient?: boolean }
   | { screen: 'settings'; isAddingBatchFreeze?: boolean }
@@ -40,7 +48,7 @@ const moneyFormatter = new Intl.NumberFormat('ru-RU', {
   style: 'currency', currency: 'RUB', maximumFractionDigits: 0,
 })
 
-function App({ repository = localStorageClientRepository, tariffRepository = localStorageTariffRepository }: AppProps) {
+function App({ repository = localStorageClientRepository, tariffRepository = localStorageTariffRepository, account }: AppProps) {
   const [activeRepository, setActiveRepository] = useState<ClientRepository>(repository)
   const [activeTariffRepository, setActiveTariffRepository] = useState<TariffRepository>(tariffRepository)
   const [isDemoMode, setIsDemoMode] = useState(false)
@@ -93,11 +101,13 @@ function App({ repository = localStorageClientRepository, tariffRepository = loc
 
   useEffect(() => {
     let isCurrent = true
-    activeRepository.list()
+    const load = () => activeRepository.list()
       .then((storedClients) => { if (isCurrent) setClients(storedClients) })
       .catch(() => { if (isCurrent) setError('Не удалось открыть данные на этом устройстве.') })
       .finally(() => { if (isCurrent) setIsLoading(false) })
-    return () => { isCurrent = false }
+    void load()
+    const unsubscribe = activeRepository.subscribe?.(() => { void load() })
+    return () => { isCurrent = false; unsubscribe?.() }
   }, [activeRepository])
 
   const retryTariffs = async () => {
@@ -108,12 +118,14 @@ function App({ repository = localStorageClientRepository, tariffRepository = loc
 
   useEffect(() => {
     let isCurrent = true
-    activeTariffRepository.list()
+    const load = () => activeTariffRepository.list()
       .then((storedTariffs) => {
         if (isCurrent) { setTariffs(storedTariffs); setTariffError(null) }
       })
       .catch(() => { if (isCurrent) setTariffError('Не удалось открыть тарифы на этом устройстве.') })
-    return () => { isCurrent = false }
+    void load()
+    const unsubscribe = activeTariffRepository.subscribe?.(() => { void load() })
+    return () => { isCurrent = false; unsubscribe?.() }
   }, [activeTariffRepository])
 
   useEffect(() => {
@@ -344,6 +356,7 @@ function App({ repository = localStorageClientRepository, tariffRepository = loc
         <p className="loading" role="status">Загружаем клиентов…</p>
       ) : isSettingsOpen ? (
         <SettingsScreen clients={activeClients} tariffs={tariffs} tariffError={tariffError}
+          account={account}
           archivedCount={archivedClients.length} isDemoMode={isDemoMode} isAddingBatchFreeze={isAddingBatchFreeze}
           onEnableDemo={enterDemoMode} onExitDemo={exitDemoMode} onFreezeBatch={freezeBatch} onResumeBatch={resumeBatch}
           onAddTariff={addTariff} onUpdateTariff={updateTariff} onDeleteTariff={deleteTariff}
@@ -390,7 +403,7 @@ function App({ repository = localStorageClientRepository, tariffRepository = loc
 }
 
 function SettingsScreen({
-  clients, tariffs, tariffError, archivedCount, isDemoMode, isAddingBatchFreeze, onEnableDemo, onExitDemo, onFreezeBatch,
+  clients, tariffs, tariffError, account, archivedCount, isDemoMode, isAddingBatchFreeze, onEnableDemo, onExitDemo, onFreezeBatch,
   onStartBatchFreeze, onCancelBatchFreeze, onResumeBatch, onAddTariff, onUpdateTariff, onDeleteTariff,
   onRetryTariffs, onOpenArchive, onBack,
   onRestoreBackup,
@@ -398,6 +411,7 @@ function SettingsScreen({
   clients: Client[]
   tariffs: Tariff[]
   tariffError: string | null
+  account?: AccountInfo
   archivedCount: number
   isDemoMode: boolean
   isAddingBatchFreeze: boolean
@@ -421,6 +435,7 @@ function SettingsScreen({
     <section className="version-summary" aria-label="Текущая версия">
       <span>Текущая версия</span><strong>{CURRENT_APP_VERSION}</strong>
     </section>
+    {account && <AccountCard account={account} />}
     <section className="settings-card" aria-labelledby="demo-mode-title">
       <div><p className="eyebrow">Безопасная проба</p><h2 id="demo-mode-title">Demo-режим</h2></div>
       <p>{isDemoMode
@@ -458,6 +473,26 @@ function SettingsScreen({
       </ol>
     </section>
   </>
+}
+
+function AccountCard({ account }: { account: AccountInfo }) {
+  const labels: Record<SyncState['phase'], string> = {
+    starting: 'Подключение', synced: 'Все изменения сохранены', offline: 'Офлайн',
+    syncing: 'Сохраняем изменения', error: 'Нужна повторная попытка',
+  }
+  return <section className="settings-card account-card" aria-labelledby="account-settings-title">
+    <div><p className="eyebrow">Облачная база</p><h2 id="account-settings-title">Аккаунт</h2></div>
+    <p className="account-email">{account.email}</p>
+    <p className={`sync-status sync-${account.syncState.phase}`} role="status">
+      {labels[account.syncState.phase]}
+      {account.syncState.pending > 0 ? ` · в очереди ${account.syncState.pending}` : ''}
+    </p>
+    <div className="form-actions">
+      {(account.syncState.phase === 'error' || account.syncState.pending > 0) && <button className="quiet-button"
+        type="button" onClick={() => void account.onSync()}>Повторить синхронизацию</button>}
+      <button className="text-button" type="button" onClick={() => void account.onSignOut()}>Выйти</button>
+    </div>
+  </section>
 }
 
 function createDemoTariffRepository() {

@@ -1,0 +1,40 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isGymMember(gymId) {
+      return signedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/gyms/$(gymId)).data.memberUids;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['gymId', 'email'])
+        && request.resource.data.gymId is string
+        && request.resource.data.email is string;
+      allow delete: if false;
+    }
+
+    match /gyms/{gymId} {
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.memberUids == [request.auth.uid]
+        && request.resource.data.dataInitialized == false;
+      allow read: if isGymMember(gymId);
+      allow update: if isGymMember(gymId)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.memberUids == resource.data.memberUids;
+      allow delete: if false;
+
+      match /{document=**} {
+        allow read, write: if isGymMember(gymId);
+      }
+    }
+  }
+}
